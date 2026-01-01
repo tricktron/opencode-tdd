@@ -26,7 +26,7 @@
         {
             default = pkgs.mkShell
             {
-                buildInputs = with pkgs;
+                packages = with pkgs;
                 [
                     nodejs
                     bun
@@ -34,7 +34,13 @@
                     typescript
                     prettier
                 ];
+
+            # Fix to avoid changing my git language to German
+            shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+                export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+             '';
             };
+
         });
     };
 }
