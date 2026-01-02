@@ -85,6 +85,7 @@
                 inherit node_modules;
 
                 nativeBuildInputs = with pkgs; [ bun ];
+                buildInputs = with pkgs; [ nodejs ];
 
                 dontConfigure = true;
 
@@ -92,10 +93,7 @@
                     runHook preBuild
 
                     cp -r ${finalAttrs.node_modules}/node_modules .
-                    chmod -R u+w node_modules
-
-                    patchShebangs node_modules/.bin
-
+                    patchShebangs node_modules
                     bun run build
 
                     runHook postBuild
@@ -104,9 +102,11 @@
                 installPhase = ''
                     runHook preInstall
 
-                    mkdir -p $out
-                    cp -r dist $out/
-                    cp package.json $out/
+                    mkdir -p $out/{bin,lib}
+                    cp package.json $out/lib/package.json
+                    cp -r node_modules $out/lib/node_modules
+                    cp dist/index.js $out/bin/opencode-tdd
+                    chmod a+x $out/bin/opencode-tdd
 
                     runHook postInstall
                 '';
