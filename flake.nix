@@ -9,8 +9,8 @@
     outputs = { self, nixpkgs, nix-github-actions, ... }:
     let
         supportedSystems = [
-            "x86_64-darwin"
             "aarch64-darwin"
+            "aarch64-linux"
             "x86_64-linux"
         ];
         forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
@@ -94,6 +94,8 @@
                     cp -r ${finalAttrs.node_modules}/node_modules .
                     chmod -R u+w node_modules
 
+                    patchShebangs node_modules/.bin
+
                     bun run build
 
                     runHook postBuild
@@ -112,15 +114,19 @@
                 doCheck = true;
 
                 checkPhase = ''
-                    bun run lint
-                    bun run test
+                    runHook preCheck
+
+                    bun lint
+                    bun test
+
+                    runHook postCheck
                 '';
             });
         });
 
         githubActions =
         let
-            githubRunnerSystems = nixpkgs.lib.lists.remove "aarch64-darwin" supportedSystems;
+            githubRunnerSystems = supportedSystems;
         in
             nix-github-actions.lib.mkGithubMatrix {
                 checks = nixpkgs.lib.getAttrs githubRunnerSystems self.packages;
