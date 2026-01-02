@@ -1,28 +1,104 @@
 import type { Plugin } from '@opencode-ai/plugin'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-export const TDDPlugin: Plugin = async ({ directory }) => {
+type TDDConfig = {
+  testOutputFile: string
+  verifierModel: string
+  maxTestOutputAge?: number
+}
+
+type LlmClient = {
+  chat: (
+    model: string,
+    messages: Array<{ role: string; content: string }>,
+  ) => Promise<string>
+}
+
+const loadConfig = async (projectRoot: string): Promise<TDDConfig | null> => {
+  const configPath = join(projectRoot, '.opencode', 'tdd.json')
+  const configRaw = await readFile(configPath, 'utf8').catch(() => null)
+  if (!configRaw) {
+    return null
+  }
+
+  try {
+    return JSON.parse(configRaw) as TDDConfig
+  } catch {
+    throw new Error('TDD: Invalid config')
+  }
+}
+
+const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
+  const testOutputPath = join(projectRoot, config.testOutputFile)
+  const testOutputStat = await stat(testOutputPath).catch(() => null)
+  if (!testOutputStat) {
+    throw new Error('TDD: Run tests first')
+  }
+
+  const maxAge =
+    typeof config.maxTestOutputAge === 'number' ? config.maxTestOutputAge : 300
+  const ageSeconds = (Date.now() - testOutputStat.mtimeMs) / 1000
+  if (ageSeconds > maxAge) {
+    throw new Error('TDD: Re-run tests')
+  }
+
+  return readFile(testOutputPath, 'utf8')
+}
+
+const getLlmClient = (client: unknown): LlmClient | null => {
+  const llmClient = client as LlmClient | undefined
+  if (!llmClient || typeof llmClient.chat !== 'function') {
+    return null
+  }
+
+  return llmClient
+}
+
+const parseDecision = (response: string) => {
+  try {
+    return JSON.parse(response) as { decision?: string; reason?: string }
+  } catch {
+    throw new Error('TDD: Invalid verifier response')
+  }
+}
+
+export const TDDPlugin: Plugin = async ({ client, directory }) => {
   return {
     'tool.execute.before': async (input, output) => {
-      if (['edit', 'write'].includes(input.tool)) {
-        const filePath = output.args.filePath as string
-        console.log(`[TDD] Intercepted ${input.tool}: ${filePath}`)
+      if (!['edit', 'write'].includes(input.tool)) {
+        return
+      }
 
-        const projectRoot = directory ?? process.cwd()
-        const testOutputPath = join(
-          projectRoot,
-          '.opencode',
-          'tdd',
-          'test-output.txt',
-        )
+      const filePath = output.args.filePath as string
+      console.log(`[TDD] Intercepted ${input.tool}: ${filePath}`)
 
-        const testOutput = await readFile(testOutputPath, 'utf8').catch(
-          () => '',
-        )
-        if (testOutput.includes('FAIL')) {
-          return
-        }
+      const projectRoot = directory ?? process.cwd()
+      const config = await loadConfig(projectRoot)
+      if (!config) {
+        return
+      }
+
+      const testOutput = await getTestOutput(projectRoot, config)
+      if (testOutput.includes('FAIL')) {
+        return
+      }
+
+      const llmClient = getLlmClient(client)
+      if (!llmClient) {
+        return
+      }
+
+      const response = await llmClient.chat(config.verifierModel, [
+        {
+          role: 'user',
+          content: `File: ${filePath}\nTest Output: ${testOutput}`,
+        },
+      ])
+
+      const parsed = parseDecision(response)
+      if (parsed.decision === 'block') {
+        throw new Error(`TDD: ${parsed.reason ?? 'Verification blocked'}`)
       }
     },
   }
