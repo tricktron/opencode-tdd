@@ -1,16 +1,14 @@
 {
-    description               = "opencode-tdd";
-    inputs.nixpkgs.url        = "github:NixOS/nixpkgs/nixos-unstable";
-    inputs.nix-github-actions =
-    {
-        url                    = "github:nix-community/nix-github-actions";
+    description = "opencode-tdd";
+    inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    inputs.nix-github-actions = {
+        url = "github:nix-community/nix-github-actions";
         inputs.nixpkgs.follows = "nixpkgs";
     };
 
     outputs = { self, nixpkgs, nix-github-actions, ... }:
     let
-        supportedSystems =
-        [
+        supportedSystems = [
             "x86_64-darwin"
             "aarch64-darwin"
             "x86_64-linux"
@@ -18,16 +16,13 @@
         forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
-        devShells = forAllSystems
-        (system:
+        devShells = forAllSystems (system:
         let
             pkgs = nixpkgs.legacyPackages.${system};
         in
         {
-            default = pkgs.mkShell
-            {
-                packages = with pkgs;
-                [
+            default = pkgs.mkShell {
+                packages = with pkgs; [
                     nodejs
                     bun
                     eslint
@@ -35,12 +30,100 @@
                     prettier
                 ];
 
-            # Fix to avoid changing my git language to German
-            shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
-                export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-             '';
+                # Fix to avoid changing my git language to German
+                shellHook = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+                    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+                '';
             };
-
         });
+
+        packages = forAllSystems (system:
+        let
+            pkgs = nixpkgs.legacyPackages.${system};
+            node_modules = pkgs.stdenvNoCC.mkDerivation {
+                pname = "opencode-tdd-node_modules";
+                version = "0.1.0";
+                src = ./.;
+
+                nativeBuildInputs = with pkgs; [ bun ];
+
+                dontConfigure = true;
+
+                buildPhase = ''
+                    runHook preBuild
+
+                    export BUN_INSTALL_CACHE_DIR=$(mktemp -d)
+
+                    bun install \
+                        --frozen-lockfile \
+                        --no-progress
+
+                    runHook postBuild
+                '';
+
+                installPhase = ''
+                    runHook preInstall
+
+                    mkdir -p $out
+                    cp -r node_modules $out/
+
+                    runHook postInstall
+                '';
+
+                dontFixup = true;
+
+                outputHash = "sha256-WQRHLbfw/cUxJdrneSPPlawmgNIkWX3UVxQDO58roV0=";
+                outputHashAlgo = "sha256";
+                outputHashMode = "recursive";
+            };
+        in
+        {
+            default = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+                pname = "opencode-tdd";
+                version = "0.1.0";
+                src = ./.;
+                inherit node_modules;
+
+                nativeBuildInputs = with pkgs; [ bun ];
+
+                dontConfigure = true;
+
+                buildPhase = ''
+                    runHook preBuild
+
+                    cp -r ${finalAttrs.node_modules}/node_modules .
+                    chmod -R u+w node_modules
+
+                    bun run build
+
+                    runHook postBuild
+                '';
+
+                installPhase = ''
+                    runHook preInstall
+
+                    mkdir -p $out
+                    cp -r dist $out/
+                    cp package.json $out/
+
+                    runHook postInstall
+                '';
+
+                doCheck = true;
+
+                checkPhase = ''
+                    bun run lint
+                    bun run test
+                '';
+            });
+        });
+
+        githubActions =
+        let
+            githubRunnerSystems = nixpkgs.lib.lists.remove "aarch64-darwin" supportedSystems;
+        in
+            nix-github-actions.lib.mkGithubMatrix {
+                checks = nixpkgs.lib.getAttrs githubRunnerSystems self.packages;
+            };
     };
 }
