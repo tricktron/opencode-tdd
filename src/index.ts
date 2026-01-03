@@ -1,32 +1,13 @@
 import type { Plugin } from '@opencode-ai/plugin'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-
-type TDDConfig = {
-  testOutputFile: string
-  verifierModel: string
-  maxTestOutputAge?: number
-}
+import { loadConfig, type TDDConfig } from './config'
 
 type LlmClient = {
   chat: (
     model: string,
     messages: Array<{ role: string; content: string }>,
   ) => Promise<string>
-}
-
-const loadConfig = async (projectRoot: string): Promise<TDDConfig | null> => {
-  const configPath = join(projectRoot, '.opencode', 'tdd.json')
-  const configRaw = await readFile(configPath, 'utf8').catch(() => null)
-  if (!configRaw) {
-    return null
-  }
-
-  try {
-    return JSON.parse(configRaw) as TDDConfig
-  } catch {
-    throw new Error('TDD: Invalid config')
-  }
 }
 
 const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
@@ -36,10 +17,8 @@ const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
     throw new Error('TDD: Run tests first')
   }
 
-  const maxAge =
-    typeof config.maxTestOutputAge === 'number' ? config.maxTestOutputAge : 300
   const ageSeconds = (Date.now() - testOutputStat.mtimeMs) / 1000
-  if (ageSeconds > maxAge) {
+  if (ageSeconds > config.maxTestOutputAge) {
     throw new Error('TDD: Re-run tests')
   }
 
@@ -74,12 +53,12 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
       console.log(`[TDD] Intercepted ${input.tool}: ${filePath}`)
 
       const projectRoot = directory ?? process.cwd()
-      const config = await loadConfig(projectRoot)
-      if (!config) {
+      const configResult = await loadConfig(projectRoot)
+      if (configResult.kind === 'missing') {
         return
       }
 
-      const testOutput = await getTestOutput(projectRoot, config)
+      const testOutput = await getTestOutput(projectRoot, configResult.config)
       if (testOutput.includes('FAIL')) {
         return
       }
@@ -89,7 +68,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const response = await llmClient.chat(config.verifierModel, [
+      const response = await llmClient.chat(configResult.config.verifierModel, [
         {
           role: 'user',
           content: `File: ${filePath}\nTest Output: ${testOutput}`,
