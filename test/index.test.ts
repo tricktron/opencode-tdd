@@ -9,8 +9,70 @@ describe('TDDPlugin', () => {
     expect(typeof TDDPlugin).toBe('function')
   })
 
+  test('allows when config is missing', async () => {
+    const projectRoot = await createProjectRoot()
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('blocks when config has invalid JSON', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfigRaw(projectRoot, '{')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Invalid config JSON')
+  })
+
+  test('blocks when required config field is missing', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      testOutputFile: '.opencode/tdd/test-output.txt',
+      testFilePatterns: ['*.test.ts'],
+      verifierModel: 'test-model',
+    })
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Missing config field: testCommand')
+  })
+
+  test('blocks when testFilePatterns is not an array', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      testFilePatterns: 'not-an-array',
+    })
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: testFilePatterns must be an array of strings')
+  })
+
   test('allows edit when tests are failing', async () => {
     const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
     await writeTestOutput(projectRoot, 'FAIL sample test output')
 
     const hook = await getHook(projectRoot)
@@ -25,10 +87,7 @@ describe('TDDPlugin', () => {
 
   test('blocks when test output is missing', async () => {
     const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, {
-      testOutputFile: '.opencode/tdd/test-output.txt',
-      verifierModel: 'test-model',
-    })
+    await writeConfig(projectRoot, baseConfig)
 
     const hook = await getHook(projectRoot)
 
@@ -50,8 +109,7 @@ describe('TDDPlugin', () => {
     await utimes(testOutputPath, staleTime, staleTime)
 
     await writeConfig(projectRoot, {
-      testOutputFile: '.opencode/tdd/test-output.txt',
-      verifierModel: 'test-model',
+      ...baseConfig,
       maxTestOutputAge: 1,
     })
 
@@ -65,13 +123,46 @@ describe('TDDPlugin', () => {
     ).rejects.toThrow('TDD: Re-run tests')
   })
 
+  test('uses default maxTestOutputAge when stale', async () => {
+    const projectRoot = await createProjectRoot()
+    const testOutputPath = await writeTestOutput(
+      projectRoot,
+      'PASS sample test output',
+    )
+    const staleTime = new Date(Date.now() - 301 * 1000)
+    await utimes(testOutputPath, staleTime, staleTime)
+
+    await writeConfig(projectRoot, baseConfig)
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Re-run tests')
+  })
+
+  test('uses default maxTestOutputAge when fresh', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS sample test output')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
   test('blocks when verifier returns block decision', async () => {
     const projectRoot = await createProjectRoot()
     await writeTestOutput(projectRoot, 'PASS sample test output')
-    await writeConfig(projectRoot, {
-      testOutputFile: '.opencode/tdd/test-output.txt',
-      verifierModel: 'test-model',
-    })
+    await writeConfig(projectRoot, baseConfig)
 
     const mockClient = {
       chat: async () =>
@@ -104,21 +195,27 @@ describe('TDDPlugin', () => {
   })
 })
 
+const baseConfig = {
+  testCommand: 'bun test',
+  testOutputFile: '.opencode/tdd/test-output.txt',
+  testFilePatterns: ['*.test.ts'],
+  verifierModel: 'test-model',
+}
+
 const createProjectRoot = async () => {
   return mkdtemp(join(tmpdir(), 'opencode-tdd-'))
 }
 
-const writeConfig = async (
-  projectRoot: string,
-  config: {
-    testOutputFile: string
-    verifierModel: string
-    maxTestOutputAge?: number
-  },
-) => {
+const writeConfig = async (projectRoot: string, config: unknown) => {
   const configPath = join(projectRoot, '.opencode', 'tdd.json')
   await mkdir(join(projectRoot, '.opencode'), { recursive: true })
   await writeFile(configPath, JSON.stringify(config))
+}
+
+const writeConfigRaw = async (projectRoot: string, content: string) => {
+  const configPath = join(projectRoot, '.opencode', 'tdd.json')
+  await mkdir(join(projectRoot, '.opencode'), { recursive: true })
+  await writeFile(configPath, content)
 }
 
 const writeTestOutput = async (projectRoot: string, content: string) => {
