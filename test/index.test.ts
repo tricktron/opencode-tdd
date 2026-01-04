@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
 import { verifyEdit } from '../src/verifier'
+import { createLogger, type Logger } from '../src/logger'
 
 const mockClient = (response: string | (() => never)) => ({
   chat: async () => {
@@ -100,6 +101,68 @@ describe('Classifier', () => {
   })
 })
 
+describe('Logger', () => {
+  test('given allowed edit, logs INFO with file path', async () => {
+    const projectRoot = await createProjectRoot()
+    const logger = createLogger(projectRoot)
+
+    await logger.info('Allowed edit: src/example.ts')
+
+    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
+    const logContent = await readFile(logPath, 'utf8')
+    expect(logContent).toContain('[INFO] Allowed edit: src/example.ts')
+  })
+
+  test('given blocked edit, logs WARN with reason', async () => {
+    const projectRoot = await createProjectRoot()
+    const logger = createLogger(projectRoot)
+
+    await logger.warn('Blocked: Write a failing test first')
+
+    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
+    const logContent = await readFile(logPath, 'utf8')
+    expect(logContent).toContain('[WARN] Blocked: Write a failing test first')
+  })
+
+  test('given test output error, logs ERROR with details', async () => {
+    const projectRoot = await createProjectRoot()
+    const logger = createLogger(projectRoot)
+
+    await logger.error('Test output missing')
+
+    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
+    const logContent = await readFile(logPath, 'utf8')
+    expect(logContent).toContain('[ERROR] Test output missing')
+  })
+
+  test('given any log entry, includes ISO timestamp', async () => {
+    const projectRoot = await createProjectRoot()
+    const logger = createLogger(projectRoot)
+
+    await logger.info('test message')
+
+    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
+    const logContent = await readFile(logPath, 'utf8')
+    // ISO timestamp format: 2024-01-15T10:30:00.000Z
+    expect(logContent).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]/)
+  })
+
+  test('given existing log file, appends instead of overwriting', async () => {
+    const projectRoot = await createProjectRoot()
+    const logDir = join(projectRoot, '.opencode', 'tdd')
+    await mkdir(logDir, { recursive: true })
+    const logPath = join(logDir, 'tdd.log')
+    await writeFile(logPath, 'existing content\n')
+
+    const logger = createLogger(projectRoot)
+    await logger.info('new message')
+
+    const logContent = await readFile(logPath, 'utf8')
+    expect(logContent).toContain('existing content')
+    expect(logContent).toContain('[INFO] new message')
+  })
+})
+
 describe('TDDPlugin', () => {
   test('exports a plugin function', () => {
     expect(typeof TDDPlugin).toBe('function')
@@ -115,6 +178,22 @@ describe('TDDPlugin', () => {
         { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
       ),
     ).resolves.toBeUndefined()
+  })
+
+  test('logs INFO when edit is allowed', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test output')
+
+    const hook = await getHook(projectRoot)
+    await hook(
+      { tool: 'edit' } as Parameters<typeof hook>[0],
+      { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+    )
+
+    const logContent = await readLog(projectRoot)
+    expect(logContent).toContain('[INFO]')
+    expect(logContent).toContain('src/example.ts')
   })
 
   test('blocks when config has invalid JSON', async () => {
@@ -195,6 +274,26 @@ describe('TDDPlugin', () => {
     ).rejects.toThrow('TDD: Run tests first')
   })
 
+  test('logs ERROR when test output is missing', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+
+    const hook = await getHook(projectRoot)
+
+    try {
+      await hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      )
+    } catch {
+      // Expected to throw
+    }
+
+    const logContent = await readLog(projectRoot)
+    expect(logContent).toContain('[ERROR]')
+    expect(logContent).toContain('Run tests first')
+  })
+
   test('blocks when test output is stale', async () => {
     const projectRoot = await createProjectRoot()
     const testOutputPath = await writeTestOutput(
@@ -217,6 +316,36 @@ describe('TDDPlugin', () => {
         { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
       ),
     ).rejects.toThrow('TDD: Re-run tests')
+  })
+
+  test('logs ERROR when test output is stale', async () => {
+    const projectRoot = await createProjectRoot()
+    const testOutputPath = await writeTestOutput(
+      projectRoot,
+      'PASS sample test output',
+    )
+    const staleTime = new Date(Date.now() - 2 * 1000)
+    await utimes(testOutputPath, staleTime, staleTime)
+
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      maxTestOutputAge: 1,
+    })
+
+    const hook = await getHook(projectRoot)
+
+    try {
+      await hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      )
+    } catch {
+      // Expected to throw
+    }
+
+    const logContent = await readLog(projectRoot)
+    expect(logContent).toContain('[ERROR]')
+    expect(logContent).toContain('Re-run tests')
   })
 
   test('uses default maxTestOutputAge when stale', async () => {
@@ -299,6 +428,35 @@ describe('TDDPlugin', () => {
     ).rejects.toThrow('TDD: Write a failing test first')
   })
 
+  test('logs WARN when edit is blocked', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeTestOutput(projectRoot, 'PASS sample test output')
+    await writeConfig(projectRoot, baseConfig)
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({
+          decision: 'block',
+          reason: 'Write a failing test first',
+        }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    try {
+      await hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      )
+    } catch {
+      // Expected to throw
+    }
+
+    const logContent = await readLog(projectRoot)
+    expect(logContent).toContain('[WARN]')
+    expect(logContent).toContain('Write a failing test first')
+  })
+
   test('skips verification for non-edit tools', async () => {
     const projectRoot = await createProjectRoot()
     const hook = await getHook(projectRoot)
@@ -355,4 +513,9 @@ const getHook = async (projectRoot: string, client?: unknown) => {
   }
 
   return hook
+}
+
+const readLog = async (projectRoot: string) => {
+  const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
+  return readFile(logPath, 'utf8')
 }
