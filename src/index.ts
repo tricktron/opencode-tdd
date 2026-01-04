@@ -3,13 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { classify } from './classifier'
 import { loadConfig, type TDDConfig } from './config'
-
-type LlmClient = {
-  chat: (
-    model: string,
-    messages: Array<{ role: string; content: string }>,
-  ) => Promise<string>
-}
+import { verifyEdit, type LlmClient } from './verifier'
 
 const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
   const testOutputPath = join(projectRoot, config.testOutputFile)
@@ -33,14 +27,6 @@ const getLlmClient = (client: unknown): LlmClient | null => {
   }
 
   return llmClient
-}
-
-const parseDecision = (response: string) => {
-  try {
-    return JSON.parse(response) as { decision?: string; reason?: string }
-  } catch {
-    throw new Error('TDD: Invalid verifier response')
-  }
 }
 
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
@@ -74,16 +60,14 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const response = await llmClient.chat(configResult.config.verifierModel, [
-        {
-          role: 'user',
-          content: `File: ${filePath}\nTest Output: ${testOutput}`,
-        },
-      ])
-
-      const parsed = parseDecision(response)
-      if (parsed.decision === 'block') {
-        throw new Error(`TDD: ${parsed.reason ?? 'Verification blocked'}`)
+      const result = await verifyEdit(
+        llmClient,
+        configResult.config.verifierModel,
+        filePath,
+        testOutput,
+      )
+      if (!result.allowed) {
+        throw new Error(`TDD: ${result.reason}`)
       }
     },
   }
