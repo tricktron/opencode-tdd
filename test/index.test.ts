@@ -4,6 +4,28 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
 
+describe('Classifier', () => {
+  test('given pattern *.test.ts, foo.test.ts is a test file', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('foo.test.ts', ['*.test.ts'])).toBe('test')
+  })
+
+  test('given any pattern, src/foo.ts is an impl file', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('src/foo.ts', ['*.test.ts'])).toBe('impl')
+  })
+
+  test('given pattern **/*.test.ts, src/utils/foo.test.ts is a test file', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('src/utils/foo.test.ts', ['**/*.test.ts'])).toBe('test')
+  })
+
+  test('given pattern test/**/*.ts, test/unit/foo.ts is a test file', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('test/unit/foo.ts', ['test/**/*.ts'])).toBe('test')
+  })
+})
+
 describe('TDDPlugin', () => {
   test('exports a plugin function', () => {
     expect(typeof TDDPlugin).toBe('function')
@@ -155,6 +177,27 @@ describe('TDDPlugin', () => {
       hook(
         { tool: 'edit' } as Parameters<typeof hook>[0],
         { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('allows test file edits when tests pass without LLM verification', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS sample test output')
+
+    const mockClient = {
+      chat: async () => {
+        throw new Error('Should not call LLM for test files')
+      },
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'foo.test.ts' } } as Parameters<typeof hook>[1],
       ),
     ).resolves.toBeUndefined()
   })

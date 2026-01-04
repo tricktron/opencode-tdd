@@ -1,6 +1,7 @@
 import type { Plugin } from '@opencode-ai/plugin'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { classify } from './classifier'
 import { loadConfig, type TDDConfig } from './config'
 
 type LlmClient = {
@@ -60,6 +61,11 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
 
       const testOutput = await getTestOutput(projectRoot, configResult.config)
       if (testOutput.includes('FAIL')) {
+        return
+      }
+
+      const fileType = classify(filePath, configResult.config.testFilePatterns)
+      if (fileType === 'test') {
         return
       }
 
