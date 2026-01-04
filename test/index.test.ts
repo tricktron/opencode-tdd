@@ -3,6 +3,80 @@ import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
+import { verifyEdit } from '../src/verifier'
+
+const mockClient = (response: string | (() => never)) => ({
+  chat: async () => {
+    if (typeof response === 'function') response()
+    return response as string
+  },
+})
+
+describe('Verifier', () => {
+  test('given LLM API failure, blocks with helpful error message', async () => {
+    const client = mockClient(() => {
+      throw new Error('Network error')
+    })
+    const result = await verifyEdit(client, 'model', 'file.ts', 'output')
+    expect(result).toEqual({
+      allowed: false,
+      reason: 'Verification failed: Network error',
+    })
+  })
+
+  test('given invalid JSON response, blocks with Invalid verifier response', async () => {
+    const result = await verifyEdit(
+      mockClient('not valid json'),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({
+      allowed: false,
+      reason: 'Invalid verifier response',
+    })
+  })
+
+  test('given JSON wrapped in markdown code block, extracts and parses correctly', async () => {
+    const result = await verifyEdit(
+      mockClient('```json\n{"decision": "allow"}\n```'),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: true })
+  })
+
+  test('given missing decision field, treats as block', async () => {
+    const result = await verifyEdit(
+      mockClient(JSON.stringify({ reason: 'some reason' })),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: false, reason: 'some reason' })
+  })
+
+  test('given invalid decision value like maybe, treats as block', async () => {
+    const result = await verifyEdit(
+      mockClient(JSON.stringify({ decision: 'maybe', reason: 'not sure' })),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: false, reason: 'not sure' })
+  })
+
+  test('given missing reason field when blocking, uses default reason', async () => {
+    const result = await verifyEdit(
+      mockClient(JSON.stringify({ decision: 'block' })),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: false, reason: 'Verification blocked' })
+  })
+})
 
 describe('Classifier', () => {
   test('given pattern *.test.ts, foo.test.ts is a test file', async () => {
