@@ -163,6 +163,91 @@ describe('Logger', () => {
   })
 })
 
+describe('Edge Cases', () => {
+  test('given test output age at boundary, treats maxAge as fresh and maxAge+1 as stale', async () => {
+    const maxAge = 10
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, { ...baseConfig, maxTestOutputAge: maxAge })
+
+    // At maxAge boundary (fresh) - slightly under to account for execution time
+    const testOutputPath = await writeTestOutput(
+      projectRoot,
+      'FAIL test output',
+    )
+    const atBoundary = new Date(Date.now() - (maxAge - 0.5) * 1000)
+    await utimes(testOutputPath, atBoundary, atBoundary)
+    const hook = await getHook(projectRoot)
+
+    await expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+
+    // Just past maxAge (stale)
+    const pastBoundary = new Date(Date.now() - (maxAge + 1) * 1000)
+    await utimes(testOutputPath, pastBoundary, pastBoundary)
+
+    await expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Re-run tests')
+  })
+
+  test('given empty test output file, proceeds with empty string', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeTestOutput(projectRoot, '')
+    await writeConfig(projectRoot, baseConfig)
+    const hook = await getHook(projectRoot)
+
+    // Empty test output should not contain 'FAIL', so it goes to verification
+    // Without LLM client, it should allow
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given empty testFilePatterns array, all files are implementation', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('foo.test.ts', [])).toBe('impl')
+    expect(classify('test/unit/foo.ts', [])).toBe('impl')
+    expect(classify('anything.ts', [])).toBe('impl')
+  })
+
+  test('given special characters in file path, handles correctly', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeTestOutput(projectRoot, 'FAIL test output')
+    await writeConfig(projectRoot, baseConfig)
+    const hook = await getHook(projectRoot)
+
+    // Paths with spaces and parentheses
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/my file (copy).ts' } } as Parameters<
+          typeof hook
+        >[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given special characters in test file path pattern, classifies correctly', async () => {
+    const { classify } = await import('../src/classifier')
+    expect(classify('src/my file (copy).test.ts', ['**/*.test.ts'])).toBe(
+      'test',
+    )
+    expect(classify('test/my module (v2)/foo.ts', ['test/**/*.ts'])).toBe(
+      'test',
+    )
+  })
+})
+
 describe('TDDPlugin', () => {
   test('exports a plugin function', () => {
     expect(typeof TDDPlugin).toBe('function')
