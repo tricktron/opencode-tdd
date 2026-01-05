@@ -7,6 +7,26 @@ export type LlmClient = {
 
 type VerifyResult = { allowed: true } | { allowed: false; reason: string }
 
+const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier.
+
+Analyze the file edit and determine:
+1. Is this edit adding/modifying TEST code or IMPLEMENTATION code?
+2. If implementation: does it follow TDD rules?
+
+TDD Rules for GREEN phase (all tests passing):
+- Adding new test code: ALLOWED (starting next RED phase)
+- Refactoring without new behavior: ALLOWED
+- Adding new implementation behavior: BLOCKED (write failing test first)
+
+Respond with JSON only:
+{
+  "editType": "test" | "impl",
+  "decision": "allow" | "block",
+  "reason": "brief explanation"
+}
+
+If editType is "test", decision is ignored (tests always allowed in GREEN).`
+
 const extractJson = (response: string): string => {
   const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/)
   return codeBlockMatch ? codeBlockMatch[1].trim() : response
@@ -36,6 +56,10 @@ export const verifyEdit = async (
   let response: string
   try {
     response = await client.chat(model, [
+      {
+        role: 'system',
+        content: SYSTEM_PROMPT,
+      },
       {
         role: 'user',
         content: `File: ${filePath}\nTest Output: ${testOutput}`,
