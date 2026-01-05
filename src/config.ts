@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type TDDConfig = {
-  testCommand: string
   testOutputFile: string
   enforcePatterns?: string[]
   verifierModel: string
@@ -45,7 +44,6 @@ export const loadConfig = async (
     throw new Error('TDD: Invalid config JSON')
   }
 
-  const testCommand = requireString(config.testCommand, 'testCommand')
   const testOutputFile = requireString(config.testOutputFile, 'testOutputFile')
   let enforcePatterns: string[] | undefined
   if (config.enforcePatterns !== undefined) {
@@ -61,7 +59,6 @@ export const loadConfig = async (
   return {
     kind: 'loaded',
     config: {
-      testCommand,
       testOutputFile,
       enforcePatterns,
       verifierModel,

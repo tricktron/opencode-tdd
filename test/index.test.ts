@@ -625,7 +625,6 @@ describe('TDDPlugin', () => {
   test('blocks when required config field is missing', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
-      testOutputFile: '.opencode/tdd/test-output.txt',
       enforcePatterns: ['src/**'],
       verifierModel: 'test-model',
     })
@@ -637,7 +636,7 @@ describe('TDDPlugin', () => {
         { tool: 'edit' } as Parameters<typeof hook>[0],
         { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
       ),
-    ).rejects.toThrow('TDD: Missing config field: testCommand')
+    ).rejects.toThrow('TDD: Missing config field: testOutputFile')
   })
 
   test('blocks when enforcePatterns is not an array of strings', async () => {
@@ -862,7 +861,6 @@ describe('TDDPlugin', () => {
 })
 
 const baseConfig = {
-  testCommand: 'bun test',
   testOutputFile: '.opencode/tdd/test-output.txt',
   enforcePatterns: ['src/**', 'test/**'],
   verifierModel: 'test-model',
