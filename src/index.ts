@@ -54,6 +54,71 @@ const isEnforced = (
   return picomatch(enforcePatterns)(filePath)
 }
 
+const countFailingTests = (testOutput: string): number => {
+  const failPatterns = [/\bFAIL\b/gi, /✗/g, /\bfailed\b/gi, /\bfailing\b/gi]
+  const matches = failPatterns.flatMap(
+    (pattern) => testOutput.match(pattern) ?? [],
+  )
+  return matches.length
+}
+
+const isTestFile = (filePath: string): boolean => {
+  return /\.(test|spec)\.[jt]sx?$/.test(filePath) || filePath.includes('/test/')
+}
+
+type TDDContext = {
+  filePath: string
+  config: TDDConfig
+  testOutput: string
+  logger: Logger
+  llmClient: LlmClient | null
+}
+
+const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
+  const failCount = countFailingTests(ctx.testOutput)
+
+  if (failCount > 1) {
+    await ctx.logger.warn(
+      `Blocked: Fix existing failing test first - ${ctx.filePath}`,
+    )
+    throw new Error('TDD: Fix existing failing test first')
+  }
+
+  if (failCount === 1) {
+    await ctx.logger.info(`Allowed edit (RED): ${ctx.filePath}`)
+    return
+  }
+
+  // failCount === 0: test files can always be edited (write next test)
+  if (isTestFile(ctx.filePath)) {
+    await ctx.logger.info(`Allowed edit (test file): ${ctx.filePath}`)
+    return
+  }
+
+  await verifyWithLlm(ctx)
+}
+
+const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
+  if (!ctx.llmClient) {
+    await ctx.logger.info(`Allowed edit (no LLM): ${ctx.filePath}`)
+    return
+  }
+
+  const result = await verifyEdit(
+    ctx.llmClient,
+    ctx.config.verifierModel,
+    ctx.filePath,
+    ctx.testOutput,
+  )
+
+  if (!result.allowed) {
+    await ctx.logger.warn(`Blocked: ${result.reason} - ${ctx.filePath}`)
+    throw new Error(`TDD: ${result.reason}`)
+  }
+
+  await ctx.logger.info(`Allowed edit (verified): ${ctx.filePath}`)
+}
+
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
   const projectRoot = directory ?? process.cwd()
   const logger = createLogger(projectRoot)
@@ -82,29 +147,13 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         logger,
       )
 
-      if (testOutput.includes('FAIL')) {
-        await logger.info(`Allowed edit (RED): ${filePath}`)
-        return
-      }
-
-      const llmClient = getLlmClient(client)
-      if (!llmClient) {
-        await logger.info(`Allowed edit (no LLM): ${filePath}`)
-        return
-      }
-
-      const result = await verifyEdit(
-        llmClient,
-        configResult.config.verifierModel,
+      await enforceOneFailingTestRule({
         filePath,
+        config: configResult.config,
         testOutput,
-      )
-      if (!result.allowed) {
-        await logger.warn(`Blocked: ${result.reason} - ${filePath}`)
-        throw new Error(`TDD: ${result.reason}`)
-      }
-
-      await logger.info(`Allowed edit (verified): ${filePath}`)
+        logger,
+        llmClient: getLlmClient(client),
+      })
     },
   }
 }

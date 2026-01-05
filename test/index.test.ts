@@ -209,6 +209,123 @@ describe('Edge Cases', () => {
   })
 })
 
+describe('OneFailingTestRule', () => {
+  test('given 2+ failing tests, blocks edit with message', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test one\nFAIL test two')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Fix existing failing test first')
+  })
+
+  test('given 1 failing test, allows edit on impl file', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given 1 failing test, allows edit on test file', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'test/example.test.ts' } } as Parameters<
+          typeof hook
+        >[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given 0 failing tests and test file, allows edit without LLM verification', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS test one\nPASS test two')
+
+    // LLM would block if called - but test files should bypass LLM
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'test/example.test.ts' } } as Parameters<
+          typeof hook
+        >[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given 0 failing tests and impl file, verifies with LLM', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS test one\nPASS test two')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Write a failing test')
+  })
+
+  test('given 0 failing tests and spec file, allows edit without LLM verification', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      enforcePatterns: ['src/**', 'spec/**'],
+    })
+    await writeTestOutput(projectRoot, 'PASS test output')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'spec/example.spec.ts' } } as Parameters<
+          typeof hook
+        >[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+})
+
 describe('EnforcePatterns', () => {
   test('given file outside enforcePatterns, allows edit without TDD checks', async () => {
     const projectRoot = await createProjectRoot()
@@ -285,7 +402,7 @@ describe('EnforcePatterns', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('given test file matching enforcePatterns and tests passing, verifies with LLM', async () => {
+  test('given test file matching enforcePatterns and tests passing, allows edit to write next test', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       ...baseConfig,
@@ -295,12 +412,12 @@ describe('EnforcePatterns', () => {
 
     const mockClient = {
       chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
+        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
     }
 
     const hook = await getHook(projectRoot, mockClient)
 
-    // Test files now also go through LLM verification when enforcePatterns includes them
+    // Test files bypass LLM verification when all tests pass (write next test)
     return expect(
       hook(
         { tool: 'edit' } as Parameters<typeof hook>[0],
@@ -308,7 +425,7 @@ describe('EnforcePatterns', () => {
           typeof hook
         >[1],
       ),
-    ).rejects.toThrow('TDD: Write a failing test')
+    ).resolves.toBeUndefined()
   })
 })
 
