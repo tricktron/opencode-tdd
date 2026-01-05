@@ -77,6 +77,48 @@ describe('Verifier', () => {
     )
     expect(result).toEqual({ allowed: false, reason: 'Verification blocked' })
   })
+
+  test('given editType test, allows edit regardless of decision', async () => {
+    const result = await verifyEdit(
+      mockClient(
+        JSON.stringify({
+          editType: 'test',
+          decision: 'block',
+          reason: 'ignored',
+        }),
+      ),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: true })
+  })
+
+  test('given editType impl and decision allow, allows edit', async () => {
+    const result = await verifyEdit(
+      mockClient(JSON.stringify({ editType: 'impl', decision: 'allow' })),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: true })
+  })
+
+  test('given editType impl and decision block, blocks with reason', async () => {
+    const result = await verifyEdit(
+      mockClient(
+        JSON.stringify({
+          editType: 'impl',
+          decision: 'block',
+          reason: 'Write test first',
+        }),
+      ),
+      'model',
+      'file.ts',
+      'output',
+    )
+    expect(result).toEqual({ allowed: false, reason: 'Write test first' })
+  })
 })
 
 describe('Logger', () => {
@@ -209,6 +251,107 @@ describe('Edge Cases', () => {
   })
 })
 
+describe('LLM-Based Edit Classification', () => {
+  test('given test file and 0 failing tests, calls LLM for classification', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    let llmCalled = false
+    const mockClient = {
+      chat: async () => {
+        llmCalled = true
+        return JSON.stringify({ editType: 'test', decision: 'allow' })
+      },
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    await hook(
+      { tool: 'edit' } as Parameters<typeof hook>[0],
+      { args: { filePath: 'test/example.test.ts' } } as Parameters<
+        typeof hook
+      >[1],
+    )
+
+    // LLM must be called even for test files - no hardcoded isTestFile()
+    expect(llmCalled).toBe(true)
+  })
+
+  test('given 0 failing tests and LLM classifies as test edit, allows without checking decision', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({
+          editType: 'test',
+          decision: 'block',
+          reason: 'ignored',
+        }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    // Even a .ts impl file should be allowed if LLM says it's a test edit
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/lib.rs' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given 0 failing tests and LLM classifies as impl edit with block, blocks', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({
+          editType: 'impl',
+          decision: 'block',
+          reason: 'Write a failing test',
+        }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Write a failing test')
+  })
+
+  test('given 0 failing tests and LLM classifies as impl edit with allow, allows', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({
+          editType: 'impl',
+          decision: 'allow',
+          reason: 'Valid refactor',
+        }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+})
+
 describe('OneFailingTestRule', () => {
   test('given 2+ failing tests, blocks edit with message', async () => {
     const projectRoot = await createProjectRoot()
@@ -257,15 +400,19 @@ describe('OneFailingTestRule', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('given 0 failing tests and test file, allows edit without LLM verification', async () => {
+  test('given 0 failing tests and test file, calls LLM for classification', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
     await writeTestOutput(projectRoot, 'PASS test one\nPASS test two')
 
-    // LLM would block if called - but test files should bypass LLM
+    // LLM classifies as test edit - allows regardless of decision
     const mockClient = {
       chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
+        JSON.stringify({
+          editType: 'test',
+          decision: 'block',
+          reason: 'ignored',
+        }),
     }
 
     const hook = await getHook(projectRoot, mockClient)
@@ -300,7 +447,7 @@ describe('OneFailingTestRule', () => {
     ).rejects.toThrow('TDD: Write a failing test')
   })
 
-  test('given 0 failing tests and spec file, allows edit without LLM verification', async () => {
+  test('given 0 failing tests and spec file, calls LLM for classification', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       ...baseConfig,
@@ -308,9 +455,9 @@ describe('OneFailingTestRule', () => {
     })
     await writeTestOutput(projectRoot, 'PASS test output')
 
+    // LLM classifies as test edit
     const mockClient = {
-      chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
+      chat: async () => JSON.stringify({ editType: 'test', decision: 'allow' }),
     }
 
     const hook = await getHook(projectRoot, mockClient)
@@ -402,7 +549,7 @@ describe('EnforcePatterns', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('given test file matching enforcePatterns and tests passing, allows edit to write next test', async () => {
+  test('given test file matching enforcePatterns and tests passing, calls LLM for classification', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       ...baseConfig,
@@ -410,14 +557,13 @@ describe('EnforcePatterns', () => {
     })
     await writeTestOutput(projectRoot, 'PASS test output')
 
+    // LLM classifies test file edit as test edit
     const mockClient = {
-      chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Should not be called' }),
+      chat: async () => JSON.stringify({ editType: 'test', decision: 'allow' }),
     }
 
     const hook = await getHook(projectRoot, mockClient)
 
-    // Test files bypass LLM verification when all tests pass (write next test)
     return expect(
       hook(
         { tool: 'edit' } as Parameters<typeof hook>[0],

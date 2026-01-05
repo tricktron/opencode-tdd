@@ -12,12 +12,16 @@ const extractJson = (response: string): string => {
   return codeBlockMatch ? codeBlockMatch[1].trim() : response
 }
 
-const parseResponse = (
-  response: string,
-): { decision?: string; reason?: string } => {
+type ParsedResponse = {
+  editType?: 'test' | 'impl'
+  decision?: string
+  reason?: string
+}
+
+const parseResponse = (response: string): ParsedResponse => {
   try {
     const json = extractJson(response)
-    return JSON.parse(json) as { decision?: string; reason?: string }
+    return JSON.parse(json) as ParsedResponse
   } catch {
     throw new Error('Invalid verifier response')
   }
@@ -44,6 +48,9 @@ export const verifyEdit = async (
 
   try {
     const parsed = parseResponse(response)
+    if (parsed.editType === 'test') {
+      return { allowed: true }
+    }
     if (parsed.decision !== 'allow') {
       return { allowed: false, reason: parsed.reason ?? 'Verification blocked' }
     }
