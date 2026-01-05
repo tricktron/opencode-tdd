@@ -13,12 +13,20 @@ const mockClient = (response: string | (() => never)) => ({
   },
 })
 
+const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
+  client,
+  model: 'model',
+  filePath: 'file.ts',
+  editContent: 'content',
+  testOutput: 'output',
+})
+
 describe('Verifier', () => {
   test('given LLM API failure, blocks with helpful error message', async () => {
     const client = mockClient(() => {
       throw new Error('Network error')
     })
-    const result = await verifyEdit(client, 'model', 'file.ts', 'output')
+    const result = await verifyEdit(verifyOpts(client))
     expect(result).toEqual({
       allowed: false,
       reason: 'Verification failed: Network error',
@@ -26,12 +34,7 @@ describe('Verifier', () => {
   })
 
   test('given invalid JSON response, blocks with Invalid verifier response', async () => {
-    const result = await verifyEdit(
-      mockClient('not valid json'),
-      'model',
-      'file.ts',
-      'output',
-    )
+    const result = await verifyEdit(verifyOpts(mockClient('not valid json')))
     expect(result).toEqual({
       allowed: false,
       reason: 'Invalid verifier response',
@@ -40,82 +43,69 @@ describe('Verifier', () => {
 
   test('given JSON wrapped in markdown code block, extracts and parses correctly', async () => {
     const result = await verifyEdit(
-      mockClient('```json\n{"decision": "allow"}\n```'),
-      'model',
-      'file.ts',
-      'output',
+      verifyOpts(mockClient('```json\n{"decision": "allow"}\n```')),
     )
     expect(result).toEqual({ allowed: true })
   })
 
   test('given missing decision field, treats as block', async () => {
     const result = await verifyEdit(
-      mockClient(JSON.stringify({ reason: 'some reason' })),
-      'model',
-      'file.ts',
-      'output',
+      verifyOpts(mockClient(JSON.stringify({ reason: 'some reason' }))),
     )
     expect(result).toEqual({ allowed: false, reason: 'some reason' })
   })
 
   test('given invalid decision value like maybe, treats as block', async () => {
     const result = await verifyEdit(
-      mockClient(JSON.stringify({ decision: 'maybe', reason: 'not sure' })),
-      'model',
-      'file.ts',
-      'output',
+      verifyOpts(
+        mockClient(JSON.stringify({ decision: 'maybe', reason: 'not sure' })),
+      ),
     )
     expect(result).toEqual({ allowed: false, reason: 'not sure' })
   })
 
   test('given missing reason field when blocking, uses default reason', async () => {
     const result = await verifyEdit(
-      mockClient(JSON.stringify({ decision: 'block' })),
-      'model',
-      'file.ts',
-      'output',
+      verifyOpts(mockClient(JSON.stringify({ decision: 'block' }))),
     )
     expect(result).toEqual({ allowed: false, reason: 'Verification blocked' })
   })
 
   test('given editType test, allows edit regardless of decision', async () => {
     const result = await verifyEdit(
-      mockClient(
-        JSON.stringify({
-          editType: 'test',
-          decision: 'block',
-          reason: 'ignored',
-        }),
+      verifyOpts(
+        mockClient(
+          JSON.stringify({
+            editType: 'test',
+            decision: 'block',
+            reason: 'ignored',
+          }),
+        ),
       ),
-      'model',
-      'file.ts',
-      'output',
     )
     expect(result).toEqual({ allowed: true })
   })
 
   test('given editType impl and decision allow, allows edit', async () => {
     const result = await verifyEdit(
-      mockClient(JSON.stringify({ editType: 'impl', decision: 'allow' })),
-      'model',
-      'file.ts',
-      'output',
+      verifyOpts(
+        mockClient(JSON.stringify({ editType: 'impl', decision: 'allow' })),
+      ),
     )
     expect(result).toEqual({ allowed: true })
   })
 
   test('given editType impl and decision block, blocks with reason', async () => {
     const result = await verifyEdit(
-      mockClient(
-        JSON.stringify({
-          editType: 'impl',
-          decision: 'block',
-          reason: 'Write test first',
-        }),
+      verifyOpts(
+        mockClient(
+          JSON.stringify({
+            editType: 'impl',
+            decision: 'block',
+            reason: 'Write test first',
+          }),
+        ),
       ),
-      'model',
-      'file.ts',
-      'output',
     )
     expect(result).toEqual({ allowed: false, reason: 'Write test first' })
   })
@@ -248,6 +238,50 @@ describe('Edge Cases', () => {
         >[1],
       ),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe('Edit Content Passed to LLM', () => {
+  const setupContentCapture = async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    let receivedContent: string | undefined
+    const client = {
+      chat: async (_model: string, messages: Array<{ content: string }>) => {
+        receivedContent = messages[1].content
+        return JSON.stringify({ editType: 'test', decision: 'allow' })
+      },
+    }
+    const hook = await getHook(projectRoot, client)
+    return { hook, getReceivedContent: () => receivedContent }
+  }
+
+  test('given edit tool call, passes newString content to LLM', async () => {
+    const { hook, getReceivedContent } = await setupContentCapture()
+
+    await hook(
+      { tool: 'edit' } as Parameters<typeof hook>[0],
+      {
+        args: { filePath: 'src/example.ts', newString: 'new code here' },
+      } as Parameters<typeof hook>[1],
+    )
+
+    expect(getReceivedContent()).toContain('new code here')
+  })
+
+  test('given write tool call, passes content to LLM', async () => {
+    const { hook, getReceivedContent } = await setupContentCapture()
+
+    await hook(
+      { tool: 'write' } as Parameters<typeof hook>[0],
+      {
+        args: { filePath: 'src/example.ts', content: 'full file content' },
+      } as Parameters<typeof hook>[1],
+    )
+
+    expect(getReceivedContent()).toContain('full file content')
   })
 })
 
@@ -535,6 +569,7 @@ describe('EnforcePatterns', () => {
 
   test('given missing enforcePatterns, allows edit without TDD checks', async () => {
     const projectRoot = await createProjectRoot()
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { enforcePatterns: _, ...configWithoutEnforce } = baseConfig
     await writeConfig(projectRoot, configWithoutEnforce)
     // No test output - would fail if TDD checks ran

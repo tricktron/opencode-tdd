@@ -54,6 +54,16 @@ const isEnforced = (
   return picomatch(enforcePatterns)(filePath)
 }
 
+const getEditContent = (
+  tool: string,
+  args: Record<string, unknown>,
+): string => {
+  if (tool === 'write') {
+    return (args.content as string) ?? ''
+  }
+  return (args.newString as string) ?? ''
+}
+
 const countFailingTests = (testOutput: string): number => {
   const failPatterns = [/\bFAIL\b/gi, /✗/g, /\bfailed\b/gi, /\bfailing\b/gi]
   const matches = failPatterns.flatMap(
@@ -64,6 +74,7 @@ const countFailingTests = (testOutput: string): number => {
 
 type TDDContext = {
   filePath: string
+  editContent: string
   config: TDDConfig
   testOutput: string
   logger: Logger
@@ -95,12 +106,13 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
     return
   }
 
-  const result = await verifyEdit(
-    ctx.llmClient,
-    ctx.config.verifierModel,
-    ctx.filePath,
-    ctx.testOutput,
-  )
+  const result = await verifyEdit({
+    client: ctx.llmClient,
+    model: ctx.config.verifierModel,
+    filePath: ctx.filePath,
+    editContent: ctx.editContent,
+    testOutput: ctx.testOutput,
+  })
 
   if (!result.allowed) {
     await ctx.logger.warn(`Blocked: ${result.reason} - ${ctx.filePath}`)
@@ -138,8 +150,11 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         logger,
       )
 
+      const editContent = getEditContent(input.tool, output.args)
+
       await enforceOneFailingTestRule({
         filePath,
+        editContent,
         config: configResult.config,
         testOutput,
         logger,
