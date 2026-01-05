@@ -189,22 +189,16 @@ describe('Edge Cases', () => {
     const hook = await getHook(projectRoot)
 
     await expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
 
     // Just past maxAge (stale)
     const pastBoundary = new Date(Date.now() - (maxAge + 1) * 1000)
     await utimes(testOutputPath, pastBoundary, pastBoundary)
 
-    await expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Re-run tests')
+    await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Re-run tests',
+    )
   })
 
   test('given empty test output file, proceeds with empty string', async () => {
@@ -216,10 +210,7 @@ describe('Edge Cases', () => {
     // Empty test output should not contain 'FAIL', so it goes to verification
     // Without LLM client, it should allow
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
@@ -231,12 +222,7 @@ describe('Edge Cases', () => {
 
     // Paths with spaces and parentheses
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/my file (copy).ts' } } as Parameters<
-          typeof hook
-        >[1],
-      ),
+      callHook(hook, 'edit', 'src/my file (copy).ts'),
     ).resolves.toBeUndefined()
   })
 })
@@ -261,12 +247,9 @@ describe('Edit Content Passed to LLM', () => {
   test('given edit tool call, passes newString content to LLM', async () => {
     const { hook, getReceivedContent } = await setupContentCapture()
 
-    await hook(
-      { tool: 'edit' } as Parameters<typeof hook>[0],
-      {
-        args: { filePath: 'src/example.ts', newString: 'new code here' },
-      } as Parameters<typeof hook>[1],
-    )
+    await callHook(hook, 'edit', 'src/example.ts', {
+      newString: 'new code here',
+    })
 
     expect(getReceivedContent()).toContain('new code here')
   })
@@ -274,12 +257,9 @@ describe('Edit Content Passed to LLM', () => {
   test('given write tool call, passes content to LLM', async () => {
     const { hook, getReceivedContent } = await setupContentCapture()
 
-    await hook(
-      { tool: 'write' } as Parameters<typeof hook>[0],
-      {
-        args: { filePath: 'src/example.ts', content: 'full file content' },
-      } as Parameters<typeof hook>[1],
-    )
+    await callHook(hook, 'write', 'src/example.ts', {
+      content: 'full file content',
+    })
 
     expect(getReceivedContent()).toContain('full file content')
   })
@@ -301,184 +281,95 @@ describe('LLM-Based Edit Classification', () => {
 
     const hook = await getHook(projectRoot, mockClient)
 
-    await hook(
-      { tool: 'edit' } as Parameters<typeof hook>[0],
-      { args: { filePath: 'test/example.test.ts' } } as Parameters<
-        typeof hook
-      >[1],
-    )
+    await callHook(hook, 'edit', 'test/example.test.ts')
 
     // LLM must be called even for test files - no hardcoded isTestFile()
     expect(llmCalled).toBe(true)
   })
 
   test('given 0 failing tests and LLM classifies as test edit, allows without checking decision', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
-
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          editType: 'test',
-          decision: 'block',
-          reason: 'ignored',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const { hook } = await setupGreenPhase({
+      editType: 'test',
+      decision: 'block',
+      reason: 'ignored',
+    })
 
     // Even a .ts impl file should be allowed if LLM says it's a test edit
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/lib.rs' } } as Parameters<typeof hook>[1],
-      ),
-    ).resolves.toBeUndefined()
+    return expect(callHook(hook, 'edit', 'src/lib.rs')).resolves.toBeUndefined()
   })
 
   test('given 0 failing tests and LLM classifies as impl edit with block, blocks', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
+    const { hook } = await setupGreenPhase({
+      editType: 'impl',
+      decision: 'block',
+      reason: 'Write a failing test',
+    })
 
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          editType: 'impl',
-          decision: 'block',
-          reason: 'Write a failing test',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Write a failing test')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Write a failing test',
+    )
   })
 
   test('given 0 failing tests and LLM classifies as impl edit with allow, allows', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
-
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          editType: 'impl',
-          decision: 'allow',
-          reason: 'Valid refactor',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const { hook } = await setupGreenPhase({
+      editType: 'impl',
+      decision: 'allow',
+      reason: 'Valid refactor',
+    })
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 })
 
 describe('OneFailingTestRule', () => {
   test('given 2+ failing tests, blocks edit with message', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test one\nFAIL test two')
+    const { hook } = await setupRedPhase('FAIL test one\nFAIL test two')
 
-    const hook = await getHook(projectRoot)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Fix existing failing test first')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Fix existing failing test first',
+    )
   })
 
   test('given 1 failing test, allows edit on impl file', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
-
-    const hook = await getHook(projectRoot)
+    const { hook } = await setupRedPhase('FAIL test one\nPASS test two')
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
   test('given 1 failing test, allows edit on test file', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
-
-    const hook = await getHook(projectRoot)
+    const { hook } = await setupRedPhase('FAIL test one\nPASS test two')
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'test/example.test.ts' } } as Parameters<
-          typeof hook
-        >[1],
-      ),
+      callHook(hook, 'edit', 'test/example.test.ts'),
     ).resolves.toBeUndefined()
   })
 
   test('given 0 failing tests and test file, calls LLM for classification', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS test one\nPASS test two')
-
     // LLM classifies as test edit - allows regardless of decision
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          editType: 'test',
-          decision: 'block',
-          reason: 'ignored',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const { hook } = await setupGreenPhase({
+      editType: 'test',
+      decision: 'block',
+      reason: 'ignored',
+    })
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'test/example.test.ts' } } as Parameters<
-          typeof hook
-        >[1],
-      ),
+      callHook(hook, 'edit', 'test/example.test.ts'),
     ).resolves.toBeUndefined()
   })
 
   test('given 0 failing tests and impl file, verifies with LLM', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS test one\nPASS test two')
+    const { hook } = await setupGreenPhase({
+      decision: 'block',
+      reason: 'Write a failing test',
+    })
 
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Write a failing test')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Write a failing test',
+    )
   })
 
   test('given 0 failing tests and spec file, calls LLM for classification', async () => {
@@ -490,19 +381,13 @@ describe('OneFailingTestRule', () => {
     await writeTestOutput(projectRoot, 'PASS test output')
 
     // LLM classifies as test edit
-    const mockClient = {
-      chat: async () => JSON.stringify({ editType: 'test', decision: 'allow' }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+    )
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'spec/example.spec.ts' } } as Parameters<
-          typeof hook
-        >[1],
-      ),
+      callHook(hook, 'edit', 'spec/example.spec.ts'),
     ).resolves.toBeUndefined()
   })
 })
@@ -519,10 +404,7 @@ describe('EnforcePatterns', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'docs/readme.md' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'docs/readme.md'),
     ).resolves.toBeUndefined()
   })
 
@@ -537,10 +419,7 @@ describe('EnforcePatterns', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
@@ -552,19 +431,14 @@ describe('EnforcePatterns', () => {
     })
     await writeTestOutput(projectRoot, 'PASS test output')
 
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
-    }
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ decision: 'block', reason: 'Write a failing test' }),
+    )
 
-    const hook = await getHook(projectRoot, mockClient)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Write a failing test')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Write a failing test',
+    )
   })
 
   test('given missing enforcePatterns, allows edit without TDD checks', async () => {
@@ -577,10 +451,7 @@ describe('EnforcePatterns', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
@@ -593,19 +464,13 @@ describe('EnforcePatterns', () => {
     await writeTestOutput(projectRoot, 'PASS test output')
 
     // LLM classifies test file edit as test edit
-    const mockClient = {
-      chat: async () => JSON.stringify({ editType: 'test', decision: 'allow' }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+    )
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'test/example.test.ts' } } as Parameters<
-          typeof hook
-        >[1],
-      ),
+      callHook(hook, 'edit', 'test/example.test.ts'),
     ).resolves.toBeUndefined()
   })
 })
@@ -620,23 +485,13 @@ describe('TDDPlugin', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
   test('logs INFO when edit is allowed', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test output')
-
-    const hook = await getHook(projectRoot)
-    await hook(
-      { tool: 'edit' } as Parameters<typeof hook>[0],
-      { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-    )
+    const { projectRoot, hook } = await setupRedPhase()
+    await callHook(hook, 'edit', 'src/example.ts')
 
     const logContent = await readLog(projectRoot)
     expect(logContent).toContain('[INFO]')
@@ -649,12 +504,9 @@ describe('TDDPlugin', () => {
 
     const hook = await getHook(projectRoot)
 
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Invalid config JSON')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Invalid config JSON',
+    )
   })
 
   test('blocks when required config field is missing', async () => {
@@ -666,12 +518,9 @@ describe('TDDPlugin', () => {
 
     const hook = await getHook(projectRoot)
 
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Missing config field: testOutputFile')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Missing config field: testOutputFile',
+    )
   })
 
   test('blocks when enforcePatterns is not an array of strings', async () => {
@@ -683,26 +532,16 @@ describe('TDDPlugin', () => {
 
     const hook = await getHook(projectRoot)
 
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: enforcePatterns must be an array of strings')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: enforcePatterns must be an array of strings',
+    )
   })
 
   test('allows edit when tests are failing', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL sample test output')
-
-    const hook = await getHook(projectRoot)
+    const { hook } = await setupRedPhase()
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
@@ -712,12 +551,9 @@ describe('TDDPlugin', () => {
 
     const hook = await getHook(projectRoot)
 
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Run tests first')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Run tests first',
+    )
   })
 
   test('logs ERROR when test output is missing', async () => {
@@ -727,10 +563,7 @@ describe('TDDPlugin', () => {
     const hook = await getHook(projectRoot)
 
     try {
-      await hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      )
+      await callHook(hook, 'edit', 'src/example.ts')
     } catch {
       // Expected to throw
     }
@@ -741,50 +574,18 @@ describe('TDDPlugin', () => {
   })
 
   test('blocks when test output is stale', async () => {
-    const projectRoot = await createProjectRoot()
-    const testOutputPath = await writeTestOutput(
-      projectRoot,
-      'PASS sample test output',
+    const { hook } = await setupStaleTestOutput(2, 1)
+
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Re-run tests',
     )
-    const staleTime = new Date(Date.now() - 2 * 1000)
-    await utimes(testOutputPath, staleTime, staleTime)
-
-    await writeConfig(projectRoot, {
-      ...baseConfig,
-      maxTestOutputAge: 1,
-    })
-
-    const hook = await getHook(projectRoot)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Re-run tests')
   })
 
   test('logs ERROR when test output is stale', async () => {
-    const projectRoot = await createProjectRoot()
-    const testOutputPath = await writeTestOutput(
-      projectRoot,
-      'PASS sample test output',
-    )
-    const staleTime = new Date(Date.now() - 2 * 1000)
-    await utimes(testOutputPath, staleTime, staleTime)
-
-    await writeConfig(projectRoot, {
-      ...baseConfig,
-      maxTestOutputAge: 1,
-    })
-
-    const hook = await getHook(projectRoot)
+    const { projectRoot, hook } = await setupStaleTestOutput(2, 1)
 
     try {
-      await hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      )
+      await callHook(hook, 'edit', 'src/example.ts')
     } catch {
       // Expected to throw
     }
@@ -795,24 +596,11 @@ describe('TDDPlugin', () => {
   })
 
   test('uses default maxTestOutputAge when stale', async () => {
-    const projectRoot = await createProjectRoot()
-    const testOutputPath = await writeTestOutput(
-      projectRoot,
-      'PASS sample test output',
+    const { hook } = await setupStaleTestOutput(301)
+
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Re-run tests',
     )
-    const staleTime = new Date(Date.now() - 301 * 1000)
-    await utimes(testOutputPath, staleTime, staleTime)
-
-    await writeConfig(projectRoot, baseConfig)
-
-    const hook = await getHook(projectRoot)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Re-run tests')
   })
 
   test('uses default maxTestOutputAge when fresh', async () => {
@@ -823,56 +611,29 @@ describe('TDDPlugin', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
   })
 
   test('blocks when verifier returns block decision', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeTestOutput(projectRoot, 'PASS sample test output')
-    await writeConfig(projectRoot, baseConfig)
+    const { hook } = await setupGreenPhase({
+      decision: 'block',
+      reason: 'Write a failing test first',
+    })
 
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          decision: 'block',
-          reason: 'Write a failing test first',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).rejects.toThrow('TDD: Write a failing test first')
+    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
+      'TDD: Write a failing test first',
+    )
   })
 
   test('logs WARN when edit is blocked', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeTestOutput(projectRoot, 'PASS sample test output')
-    await writeConfig(projectRoot, baseConfig)
-
-    const mockClient = {
-      chat: async () =>
-        JSON.stringify({
-          decision: 'block',
-          reason: 'Write a failing test first',
-        }),
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
+    const { projectRoot, hook } = await setupGreenPhase({
+      decision: 'block',
+      reason: 'Write a failing test first',
+    })
 
     try {
-      await hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
-      )
+      await callHook(hook, 'edit', 'src/example.ts')
     } catch {
       // Expected to throw
     }
@@ -887,10 +648,7 @@ describe('TDDPlugin', () => {
     const hook = await getHook(projectRoot)
 
     return expect(
-      hook(
-        { tool: 'bash' } as Parameters<typeof hook>[0],
-        { args: { command: 'echo ok' } } as Parameters<typeof hook>[1],
-      ),
+      callHook(hook, 'bash', '', { command: 'echo ok' }),
     ).resolves.toBeUndefined()
   })
 })
@@ -942,4 +700,53 @@ const getHook = async (projectRoot: string, client?: unknown) => {
 const readLog = async (projectRoot: string) => {
   const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
   return readFile(logPath, 'utf8')
+}
+
+type Hook = Awaited<ReturnType<typeof TDDPlugin>>['tool.execute.before']
+
+const callHook = (
+  hook: Hook,
+  tool: string,
+  filePath: string,
+  args?: Record<string, unknown>,
+) =>
+  hook!(
+    { tool } as Parameters<NonNullable<typeof hook>>[0],
+    { args: { filePath, ...args } } as Parameters<NonNullable<typeof hook>>[1],
+  )
+
+const mockLlmResponse = (response: object) => ({
+  chat: async () => JSON.stringify(response),
+})
+
+const setupRedPhase = async (testOutput = 'FAIL test output') => {
+  const projectRoot = await createProjectRoot()
+  await writeConfig(projectRoot, baseConfig)
+  await writeTestOutput(projectRoot, testOutput)
+  const hook = await getHook(projectRoot)
+  return { projectRoot, hook }
+}
+
+const setupGreenPhase = async (llmResponse: object) => {
+  const projectRoot = await createProjectRoot()
+  await writeConfig(projectRoot, baseConfig)
+  await writeTestOutput(projectRoot, 'PASS all tests')
+  const hook = await getHook(projectRoot, mockLlmResponse(llmResponse))
+  return { projectRoot, hook }
+}
+
+const setupStaleTestOutput = async (ageSeconds: number, maxAge?: number) => {
+  const projectRoot = await createProjectRoot()
+  const testOutputPath = await writeTestOutput(
+    projectRoot,
+    'PASS sample test output',
+  )
+  const staleTime = new Date(Date.now() - ageSeconds * 1000)
+  await utimes(testOutputPath, staleTime, staleTime)
+  await writeConfig(
+    projectRoot,
+    maxAge ? { ...baseConfig, maxTestOutputAge: maxAge } : baseConfig,
+  )
+  const hook = await getHook(projectRoot)
+  return { projectRoot, hook }
 }
