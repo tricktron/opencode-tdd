@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
 import { verifyEdit } from '../src/verifier'
-import { createLogger, type Logger } from '../src/logger'
+import { createLogger } from '../src/logger'
 
 const mockClient = (response: string | (() => never)) => ({
   chat: async () => {
@@ -76,28 +76,6 @@ describe('Verifier', () => {
       'output',
     )
     expect(result).toEqual({ allowed: false, reason: 'Verification blocked' })
-  })
-})
-
-describe('Classifier', () => {
-  test('given pattern *.test.ts, foo.test.ts is a test file', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('foo.test.ts', ['*.test.ts'])).toBe('test')
-  })
-
-  test('given any pattern, src/foo.ts is an impl file', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('src/foo.ts', ['*.test.ts'])).toBe('impl')
-  })
-
-  test('given pattern **/*.test.ts, src/utils/foo.test.ts is a test file', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('src/utils/foo.test.ts', ['**/*.test.ts'])).toBe('test')
-  })
-
-  test('given pattern test/**/*.ts, test/unit/foo.ts is a test file', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('test/unit/foo.ts', ['test/**/*.ts'])).toBe('test')
   })
 })
 
@@ -213,13 +191,6 @@ describe('Edge Cases', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('given empty testFilePatterns array, all files are implementation', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('foo.test.ts', [])).toBe('impl')
-    expect(classify('test/unit/foo.ts', [])).toBe('impl')
-    expect(classify('anything.ts', [])).toBe('impl')
-  })
-
   test('given special characters in file path, handles correctly', async () => {
     const projectRoot = await createProjectRoot()
     await writeTestOutput(projectRoot, 'FAIL test output')
@@ -236,15 +207,108 @@ describe('Edge Cases', () => {
       ),
     ).resolves.toBeUndefined()
   })
+})
 
-  test('given special characters in test file path pattern, classifies correctly', async () => {
-    const { classify } = await import('../src/classifier')
-    expect(classify('src/my file (copy).test.ts', ['**/*.test.ts'])).toBe(
-      'test',
-    )
-    expect(classify('test/my module (v2)/foo.ts', ['test/**/*.ts'])).toBe(
-      'test',
-    )
+describe('EnforcePatterns', () => {
+  test('given file outside enforcePatterns, allows edit without TDD checks', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      enforcePatterns: ['src/**'],
+    })
+    // No test output file - would fail if TDD checks ran
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'docs/readme.md' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given file matching enforcePatterns and tests failing, allows edit', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      enforcePatterns: ['src/**'],
+    })
+    await writeTestOutput(projectRoot, 'FAIL test output')
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given file matching enforcePatterns and tests passing, verifies with LLM', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      enforcePatterns: ['src/**'],
+    })
+    await writeTestOutput(projectRoot, 'PASS test output')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).rejects.toThrow('TDD: Write a failing test')
+  })
+
+  test('given missing enforcePatterns, allows edit without TDD checks', async () => {
+    const projectRoot = await createProjectRoot()
+    const { enforcePatterns: _, ...configWithoutEnforce } = baseConfig
+    await writeConfig(projectRoot, configWithoutEnforce)
+    // No test output - would fail if TDD checks ran
+
+    const hook = await getHook(projectRoot)
+
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
+      ),
+    ).resolves.toBeUndefined()
+  })
+
+  test('given test file matching enforcePatterns and tests passing, verifies with LLM', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, {
+      ...baseConfig,
+      enforcePatterns: ['src/**', 'test/**'],
+    })
+    await writeTestOutput(projectRoot, 'PASS test output')
+
+    const mockClient = {
+      chat: async () =>
+        JSON.stringify({ decision: 'block', reason: 'Write a failing test' }),
+    }
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    // Test files now also go through LLM verification when enforcePatterns includes them
+    return expect(
+      hook(
+        { tool: 'edit' } as Parameters<typeof hook>[0],
+        { args: { filePath: 'test/example.test.ts' } } as Parameters<
+          typeof hook
+        >[1],
+      ),
+    ).rejects.toThrow('TDD: Write a failing test')
   })
 })
 
@@ -299,7 +363,7 @@ describe('TDDPlugin', () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       testOutputFile: '.opencode/tdd/test-output.txt',
-      testFilePatterns: ['*.test.ts'],
+      enforcePatterns: ['src/**'],
       verifierModel: 'test-model',
     })
 
@@ -313,11 +377,11 @@ describe('TDDPlugin', () => {
     ).rejects.toThrow('TDD: Missing config field: testCommand')
   })
 
-  test('blocks when testFilePatterns is not an array', async () => {
+  test('blocks when enforcePatterns is not an array of strings', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       ...baseConfig,
-      testFilePatterns: 'not-an-array',
+      enforcePatterns: 'not-an-array',
     })
 
     const hook = await getHook(projectRoot)
@@ -327,7 +391,7 @@ describe('TDDPlugin', () => {
         { tool: 'edit' } as Parameters<typeof hook>[0],
         { args: { filePath: 'src/example.ts' } } as Parameters<typeof hook>[1],
       ),
-    ).rejects.toThrow('TDD: testFilePatterns must be an array of strings')
+    ).rejects.toThrow('TDD: enforcePatterns must be an array of strings')
   })
 
   test('allows edit when tests are failing', async () => {
@@ -469,27 +533,6 @@ describe('TDDPlugin', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('allows test file edits when tests pass without LLM verification', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS sample test output')
-
-    const mockClient = {
-      chat: async () => {
-        throw new Error('Should not call LLM for test files')
-      },
-    }
-
-    const hook = await getHook(projectRoot, mockClient)
-
-    return expect(
-      hook(
-        { tool: 'edit' } as Parameters<typeof hook>[0],
-        { args: { filePath: 'foo.test.ts' } } as Parameters<typeof hook>[1],
-      ),
-    ).resolves.toBeUndefined()
-  })
-
   test('blocks when verifier returns block decision', async () => {
     const projectRoot = await createProjectRoot()
     await writeTestOutput(projectRoot, 'PASS sample test output')
@@ -558,7 +601,7 @@ describe('TDDPlugin', () => {
 const baseConfig = {
   testCommand: 'bun test',
   testOutputFile: '.opencode/tdd/test-output.txt',
-  testFilePatterns: ['*.test.ts'],
+  enforcePatterns: ['src/**', 'test/**'],
   verifierModel: 'test-model',
 }
 
