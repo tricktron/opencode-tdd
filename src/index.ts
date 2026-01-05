@@ -1,7 +1,7 @@
 import type { Plugin } from '@opencode-ai/plugin'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { classify } from './classifier'
+import picomatch from 'picomatch'
 import { loadConfig, type TDDConfig } from './config'
 import { createLogger, type Logger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
@@ -44,6 +44,16 @@ const getLlmClient = (client: unknown): LlmClient | null => {
   return llmClient
 }
 
+const isEnforced = (
+  filePath: string,
+  enforcePatterns: string[] | undefined,
+): boolean => {
+  if (!enforcePatterns) {
+    return false
+  }
+  return picomatch(enforcePatterns)(filePath)
+}
+
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
   const projectRoot = directory ?? process.cwd()
   const logger = createLogger(projectRoot)
@@ -62,6 +72,10 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
+      if (!isEnforced(filePath, configResult.config.enforcePatterns)) {
+        return
+      }
+
       const testOutput = await getTestOutputWithLogging(
         projectRoot,
         configResult.config,
@@ -70,12 +84,6 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
 
       if (testOutput.includes('FAIL')) {
         await logger.info(`Allowed edit (RED): ${filePath}`)
-        return
-      }
-
-      const fileType = classify(filePath, configResult.config.testFilePatterns)
-      if (fileType === 'test') {
-        await logger.info(`Allowed test edit: ${filePath}`)
         return
       }
 

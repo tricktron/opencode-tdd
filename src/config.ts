@@ -4,7 +4,7 @@ import { join } from 'node:path'
 export type TDDConfig = {
   testCommand: string
   testOutputFile: string
-  testFilePatterns: string[]
+  enforcePatterns?: string[]
   verifierModel: string
   maxTestOutputAge: number
 }
@@ -47,10 +47,13 @@ export const loadConfig = async (
 
   const testCommand = requireString(config.testCommand, 'testCommand')
   const testOutputFile = requireString(config.testOutputFile, 'testOutputFile')
-  const testFilePatterns = requireStringArray(
-    config.testFilePatterns,
-    'testFilePatterns',
-  )
+  let enforcePatterns: string[] | undefined
+  if (config.enforcePatterns !== undefined) {
+    enforcePatterns = requireStringArray(
+      config.enforcePatterns,
+      'enforcePatterns',
+    )
+  }
   const verifierModel = requireString(config.verifierModel, 'verifierModel')
   const maxTestOutputAge =
     typeof config.maxTestOutputAge === 'number' ? config.maxTestOutputAge : 300
@@ -60,7 +63,7 @@ export const loadConfig = async (
     config: {
       testCommand,
       testOutputFile,
-      testFilePatterns,
+      enforcePatterns,
       verifierModel,
       maxTestOutputAge,
     },
