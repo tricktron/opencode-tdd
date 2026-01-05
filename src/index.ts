@@ -62,10 +62,6 @@ const countFailingTests = (testOutput: string): number => {
   return matches.length
 }
 
-const isTestFile = (filePath: string): boolean => {
-  return /\.(test|spec)\.[jt]sx?$/.test(filePath) || filePath.includes('/test/')
-}
-
 type TDDContext = {
   filePath: string
   config: TDDConfig
@@ -89,12 +85,7 @@ const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
     return
   }
 
-  // failCount === 0: test files can always be edited (write next test)
-  if (isTestFile(ctx.filePath)) {
-    await ctx.logger.info(`Allowed edit (test file): ${ctx.filePath}`)
-    return
-  }
-
+  // failCount === 0: LLM classifies as test or impl edit
   await verifyWithLlm(ctx)
 }
 
