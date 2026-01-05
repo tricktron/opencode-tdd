@@ -7,6 +7,14 @@ export type LlmClient = {
 
 type VerifyResult = { allowed: true } | { allowed: false; reason: string }
 
+export type VerifyEditOptions = {
+  client: LlmClient
+  model: string
+  filePath: string
+  editContent: string
+  testOutput: string
+}
+
 const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier.
 
 Analyze the file edit and determine:
@@ -48,21 +56,18 @@ const parseResponse = (response: string): ParsedResponse => {
 }
 
 export const verifyEdit = async (
-  client: LlmClient,
-  model: string,
-  filePath: string,
-  testOutput: string,
+  opts: VerifyEditOptions,
 ): Promise<VerifyResult> => {
   let response: string
   try {
-    response = await client.chat(model, [
+    response = await opts.client.chat(opts.model, [
       {
         role: 'system',
         content: SYSTEM_PROMPT,
       },
       {
         role: 'user',
-        content: `File: ${filePath}\nTest Output: ${testOutput}`,
+        content: `File: ${opts.filePath}\nEdit Content:\n${opts.editContent}\n\nTest Output:\n${opts.testOutput}`,
       },
     ])
   } catch (error) {
