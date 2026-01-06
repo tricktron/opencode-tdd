@@ -118,7 +118,7 @@
                     runHook preCheck
 
                     bun lint
-                    bun test
+                    bun run test
 
                     runHook postCheck
                 '';
