@@ -30,4 +30,4 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - uses: DeterminateSystems/magic-nix-cache-action@main
       - run: nix build -L ".#${{ matrix.attr }}"
-      - run: nix develop -c bun test
+      - run: nix develop -c bun install && bun test
