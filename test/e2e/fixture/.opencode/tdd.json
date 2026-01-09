@@ -1,1 +1,5 @@
-{"testOutputFile":".opencode/tdd/smoke-test-output.txt","enforcePatterns":["**/src/**"],"verifierModel":"test-model"}
+{
+  "testOutputFile": ".opencode/tdd/smoke-test-output.txt",
+  "enforcePatterns": ["**/src/**"],
+  "verifierModel": "openai/gpt-5.1-codex-mini"
+}
