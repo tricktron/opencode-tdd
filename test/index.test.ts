@@ -22,93 +22,73 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 describe('Verifier', () => {
-  test('given LLM API failure, blocks with helpful error message', async () => {
-    const client = mockClient(() => {
-      throw new Error('Network error')
+  const verifierTests = [
+    {
+      name: 'given LLM API failure, blocks with helpful error message',
+      response: () => {
+        throw new Error('Network error')
+      },
+      expected: {
+        allowed: false,
+        reason: 'Verification failed: Network error',
+      },
+    },
+    {
+      name: 'given invalid JSON response, blocks with Invalid verifier response',
+      response: 'not valid json',
+      expected: { allowed: false, reason: 'Invalid verifier response' },
+    },
+    {
+      name: 'given JSON wrapped in markdown code block, extracts and parses correctly',
+      response: '```json\n{"decision": "allow"}\n```',
+      expected: { allowed: true },
+    },
+    {
+      name: 'given missing decision field, treats as block',
+      response: JSON.stringify({ reason: 'some reason' }),
+      expected: { allowed: false, reason: 'some reason' },
+    },
+    {
+      name: 'given invalid decision value like maybe, treats as block',
+      response: JSON.stringify({ decision: 'maybe', reason: 'not sure' }),
+      expected: { allowed: false, reason: 'not sure' },
+    },
+    {
+      name: 'given missing reason field when blocking, uses default reason',
+      response: JSON.stringify({ decision: 'block' }),
+      expected: { allowed: false, reason: 'Verification blocked' },
+    },
+    {
+      name: 'given editType test, allows edit regardless of decision',
+      response: JSON.stringify({
+        editType: 'test',
+        decision: 'block',
+        reason: 'ignored',
+      }),
+      expected: { allowed: true },
+    },
+    {
+      name: 'given editType impl and decision allow, allows edit',
+      response: JSON.stringify({ editType: 'impl', decision: 'allow' }),
+      expected: { allowed: true },
+    },
+    {
+      name: 'given editType impl and decision block, blocks with reason',
+      response: JSON.stringify({
+        editType: 'impl',
+        decision: 'block',
+        reason: 'Write test first',
+      }),
+      expected: { allowed: false, reason: 'Write test first' },
+    },
+  ] as const
+
+  for (const tc of verifierTests) {
+    test(tc.name, async () => {
+      const result = await verifyEdit(verifyOpts(mockClient(tc.response)))
+      expect(result).toEqual(tc.expected)
     })
-    const result = await verifyEdit(verifyOpts(client))
-    expect(result).toEqual({
-      allowed: false,
-      reason: 'Verification failed: Network error',
-    })
-  })
-
-  test('given invalid JSON response, blocks with Invalid verifier response', async () => {
-    const result = await verifyEdit(verifyOpts(mockClient('not valid json')))
-    expect(result).toEqual({
-      allowed: false,
-      reason: 'Invalid verifier response',
-    })
-  })
-
-  test('given JSON wrapped in markdown code block, extracts and parses correctly', async () => {
-    const result = await verifyEdit(
-      verifyOpts(mockClient('```json\n{"decision": "allow"}\n```')),
-    )
-    expect(result).toEqual({ allowed: true })
-  })
-
-  test('given missing decision field, treats as block', async () => {
-    const result = await verifyEdit(
-      verifyOpts(mockClient(JSON.stringify({ reason: 'some reason' }))),
-    )
-    expect(result).toEqual({ allowed: false, reason: 'some reason' })
-  })
-
-  test('given invalid decision value like maybe, treats as block', async () => {
-    const result = await verifyEdit(
-      verifyOpts(
-        mockClient(JSON.stringify({ decision: 'maybe', reason: 'not sure' })),
-      ),
-    )
-    expect(result).toEqual({ allowed: false, reason: 'not sure' })
-  })
-
-  test('given missing reason field when blocking, uses default reason', async () => {
-    const result = await verifyEdit(
-      verifyOpts(mockClient(JSON.stringify({ decision: 'block' }))),
-    )
-    expect(result).toEqual({ allowed: false, reason: 'Verification blocked' })
-  })
-
-  test('given editType test, allows edit regardless of decision', async () => {
-    const result = await verifyEdit(
-      verifyOpts(
-        mockClient(
-          JSON.stringify({
-            editType: 'test',
-            decision: 'block',
-            reason: 'ignored',
-          }),
-        ),
-      ),
-    )
-    expect(result).toEqual({ allowed: true })
-  })
-
-  test('given editType impl and decision allow, allows edit', async () => {
-    const result = await verifyEdit(
-      verifyOpts(
-        mockClient(JSON.stringify({ editType: 'impl', decision: 'allow' })),
-      ),
-    )
-    expect(result).toEqual({ allowed: true })
-  })
-
-  test('given editType impl and decision block, blocks with reason', async () => {
-    const result = await verifyEdit(
-      verifyOpts(
-        mockClient(
-          JSON.stringify({
-            editType: 'impl',
-            decision: 'block',
-            reason: 'Write test first',
-          }),
-        ),
-      ),
-    )
-    expect(result).toEqual({ allowed: false, reason: 'Write test first' })
-  })
+  }
 })
 
 describe('Logger', () => {
