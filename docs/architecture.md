@@ -17,6 +17,25 @@ Add SDK-driven end-to-end tests that start an opencode server/client programmati
 - Avoid LLM variability: use missing test output for block, single FAIL for allow
 - Use `Promise.race(log polling, session.idle)` for reliability when plugin blocks before LLM runs
 
+## Test Isolation Strategy
+
+To ensure tests can run together without side effects:
+
+- **Random port allocation**: Use `port: 0` to let OS assign available ports
+- **Clean shared state**: `afterEach` hook restores fixture state:
+  - Git restore source files that LLM may edit
+  - Remove log files (`.opencode/tdd/tdd.log`)
+  - Remove test output files (`.opencode/tdd/smoke-test-output.txt`)
+- **Process cwd restoration**: Always restore in `finally` blocks
+- **Server cleanup**: Always close server in `finally` blocks
+
+These measures prevent:
+
+- Port conflicts between tests
+- State leakage via log files
+- Source file mutations persisting between tests
+- Process state corruption
+
 ## Out of Scope
 
 - TUI automation or slash command flows
