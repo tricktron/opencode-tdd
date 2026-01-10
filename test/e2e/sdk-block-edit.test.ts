@@ -30,13 +30,16 @@ const setupFixture = async () => {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  await proc.exited
+  const exitCode = await proc.exited
+  if (exitCode !== 0) {
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(`Build failed with code ${exitCode}: ${stderr}`)
+  }
   await mkdir(join(fixtureRoot, '.opencode/plugin'), { recursive: true })
   await mkdir(join(fixtureRoot, '.git'), { recursive: true })
-  await copyFile(
-    join(repoRoot, 'dist', 'index.js'),
-    join(fixtureRoot, '.opencode/plugin/index.js'),
-  )
+  const distPath = join(repoRoot, 'dist', 'index.js')
+  const pluginPath = join(fixtureRoot, '.opencode/plugin/index.js')
+  await copyFile(distPath, pluginPath)
 }
 
 const cleanupTest = async () => {
@@ -149,6 +152,22 @@ describe('SDK E2E', () => {
         assertions: (log) => {
           expect(log).toContain('Allowed edit (RED)')
           expect(log).toContain('src/foo.ts')
+        },
+      }),
+    TEST_TIMEOUT_MS,
+  )
+
+  test(
+    'blocks non-test edit when all tests pass',
+    () =>
+      runTddPluginTest({
+        setupTestOutput: async () => {
+          await Bun.write(testOutputPath, 'PASS all tests')
+        },
+        expectedLogPattern: 'Blocked',
+        assertions: (log) => {
+          expect(log).toContain('Blocked')
+          expect(log).toContain('Write a failing test')
         },
       }),
     TEST_TIMEOUT_MS,

@@ -24,16 +24,17 @@ Analyze the file edit and determine:
 TDD Rules for GREEN phase (all tests passing):
 - Adding new test code: ALLOWED (starting next RED phase)
 - Refactoring without new behavior: ALLOWED
-- Adding new implementation behavior: BLOCKED (write failing test first)
+- Adding new implementation behavior: BLOCKED (Write a failing test first)
 
-Respond with JSON only:
+Respond with JSON only (no markdown, no code blocks):
 {
   "editType": "test" | "impl",
   "decision": "allow" | "block",
   "reason": "brief explanation"
 }
 
-If editType is "test", decision is ignored (tests always allowed in GREEN).`
+If editType is "test", decision is ignored (tests always allowed in GREEN).
+For implementation edits in GREEN phase, use reason: "Write a failing test first".`
 
 const extractJson = (response: string): string => {
   const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -81,10 +82,17 @@ export const verifyEdit = async (
       return { allowed: true }
     }
     if (parsed.decision !== 'allow') {
-      return { allowed: false, reason: parsed.reason ?? 'Verification blocked' }
+      return {
+        allowed: false,
+        reason: parsed.reason ?? 'Write a failing test first',
+      }
     }
     return { allowed: true }
-  } catch {
-    return { allowed: false, reason: 'Invalid verifier response' }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    return {
+      allowed: false,
+      reason: `Invalid verifier response: ${errorMsg} (${response.substring(0, 100)})`,
+    }
   }
 }
