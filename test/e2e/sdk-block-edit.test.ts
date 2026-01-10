@@ -16,14 +16,14 @@ const waitForLogEntry = async (
   logPath: string,
   pattern: string,
   timeout: number,
-): Promise<string> => {
+): Promise<void> => {
   const start = Date.now()
   while (Date.now() - start < timeout) {
     const content = await readFile(logPath, 'utf8').catch(() => '')
-    if (content.includes(pattern)) return content
+    if (content.includes(pattern)) return
     await Bun.sleep(500)
   }
-  return readFile(logPath, 'utf8').catch(() => '')
+  throw new Error(`Timeout waiting for log entry: ${pattern}`)
 }
 
 const setupFixture = async () => {
@@ -74,10 +74,15 @@ describe('SDK E2E', () => {
         throw new Error('Missing session id')
       }
 
-      // Trigger prompt but don't await - it may hang if LLM is unavailable
-      client.session.prompt({
+      const { stream } = await client.event.subscribe()
+
+      await client.session.promptAsync({
         path: { id: sessionId },
         body: {
+          model: {
+            providerID: 'opencode',
+            modelID: 'minimax-m2.1-free',
+          },
           parts: [
             {
               type: 'text',
@@ -87,14 +92,27 @@ describe('SDK E2E', () => {
         },
       })
 
-      // Give plugin time to intercept and log
-      await Bun.sleep(2000)
+      const waitForSessionIdle = async () => {
+        for await (const event of stream) {
+          if (
+            event.type === 'session.idle' &&
+            event.properties.sessionID === sessionId
+          ) {
+            return
+          }
+        }
+      }
 
-      const log = await waitForLogEntry(logPath, 'Run tests first', 30000)
+      await Promise.race([
+        waitForLogEntry(logPath, 'Run tests first', 20000),
+        waitForSessionIdle(),
+      ])
+
+      const log = await readFile(logPath, 'utf8')
       expect(log).toContain('Run tests first')
     } finally {
       server.close()
       process.chdir(originalCwd)
     }
-  }, 45000)
+  }, 15000)
 })
