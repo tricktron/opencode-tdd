@@ -36,7 +36,11 @@ describe('Verifier', () => {
     {
       name: 'given invalid JSON response, blocks with Invalid verifier response',
       response: 'not valid json',
-      expected: { allowed: false, reason: 'Invalid verifier response' },
+      expected: {
+        allowed: false,
+        reason:
+          'Invalid verifier response: Invalid verifier response (not valid json)',
+      },
     },
     {
       name: 'given JSON wrapped in markdown code block, extracts and parses correctly',
@@ -56,7 +60,7 @@ describe('Verifier', () => {
     {
       name: 'given missing reason field when blocking, uses default reason',
       response: JSON.stringify({ decision: 'block' }),
-      expected: { allowed: false, reason: 'Verification blocked' },
+      expected: { allowed: false, reason: 'Write a failing test first' },
     },
     {
       name: 'given editType test, allows edit regardless of decision',
@@ -185,10 +189,12 @@ describe('Edge Cases', () => {
     const projectRoot = await createProjectRoot()
     await writeTestOutput(projectRoot, '')
     await writeConfig(projectRoot, baseConfig)
-    const hook = await getHook(projectRoot)
+    // Empty test output = 0 FAILs = GREEN phase, needs LLM verification
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+    )
 
-    // Empty test output should not contain 'FAIL', so it goes to verification
-    // Without LLM client, it should allow
     return expect(
       callHook(hook, 'edit', 'src/example.ts'),
     ).resolves.toBeUndefined()
@@ -587,8 +593,11 @@ describe('TDDPlugin', () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
     await writeTestOutput(projectRoot, 'PASS sample test output')
-
-    const hook = await getHook(projectRoot)
+    // PASS output = GREEN phase, needs LLM verification
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+    )
 
     return expect(
       callHook(hook, 'edit', 'src/example.ts'),

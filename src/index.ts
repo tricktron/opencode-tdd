@@ -35,13 +35,83 @@ const getTestOutputWithLogging = async (
   }
 }
 
-const getLlmClient = (client: unknown): LlmClient | null => {
-  const llmClient = client as LlmClient | undefined
-  if (!llmClient || typeof llmClient.chat !== 'function') {
-    return null
+type SdkClient = {
+  session: {
+    create: (opts: {
+      body: { title: string; parent?: string }
+    }) => Promise<{ data?: { id: string }; error?: unknown }>
+    prompt: (opts: {
+      path: { id: string }
+      body: {
+        model: { providerID: string; modelID: string }
+        parts: Array<{ type: string; text: string }>
+      }
+    }) => Promise<{
+      data?: { parts?: Array<{ type: string; text?: string }> }
+      error?: unknown
+    }>
+    delete: (opts: { path: { id: string } }) => Promise<unknown>
   }
+}
 
-  return llmClient
+const createSdkAdapter = (
+  sdkClient: SdkClient,
+  parentSessionId: string,
+): LlmClient => ({
+  chat: async (
+    model: string,
+    messages: Array<{ role: string; content: string }>,
+  ) => {
+    const systemMsg = messages.find((m) => m.role === 'system')?.content ?? ''
+    const userMsg = messages.find((m) => m.role === 'user')?.content ?? ''
+    const combinedPrompt = `${systemMsg}\n\n${userMsg}`
+    const [providerId, modelId] = model.split('/')
+
+    const sessionResult = await sdkClient.session.create({
+      body: { title: 'TDD Verifier', parent: parentSessionId },
+    })
+
+    if (sessionResult.error || !sessionResult.data?.id) {
+      throw new Error('Failed to create verification session')
+    }
+
+    const childId = sessionResult.data.id
+
+    try {
+      const promptResult = await sdkClient.session.prompt({
+        path: { id: childId },
+        body: {
+          model: { providerID: providerId, modelID: modelId },
+          parts: [{ type: 'text', text: combinedPrompt }],
+        },
+      })
+
+      if (promptResult.error) {
+        throw new Error('Verification prompt failed')
+      }
+
+      const textPart = promptResult.data?.parts?.find((p) => p.type === 'text')
+      const response = textPart?.text ?? ''
+
+      if (!response) {
+        throw new Error('No LLM response text received')
+      }
+
+      return response
+    } finally {
+      await sdkClient.session.delete({ path: { id: childId } }).catch(() => {})
+    }
+  },
+})
+
+// For unit tests: check if client has a direct chat method (mock)
+// For real usage: always use SDK adapter
+const resolveLlmClient = (client: unknown, sessionId: string): LlmClient => {
+  const mockClient = client as LlmClient | undefined
+  if (mockClient && typeof mockClient.chat === 'function') {
+    return mockClient
+  }
+  return createSdkAdapter(client as SdkClient, sessionId)
 }
 
 const isEnforced = (
@@ -78,7 +148,7 @@ type TDDContext = {
   config: TDDConfig
   testOutput: string
   logger: Logger
-  llmClient: LlmClient | null
+  llmClient: LlmClient
 }
 
 const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
@@ -96,16 +166,11 @@ const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
     return
   }
 
-  // failCount === 0: LLM classifies as test or impl edit
+  // failCount === 0: GREEN phase - LLM classifies as test or impl edit
   await verifyWithLlm(ctx)
 }
 
 const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
-  if (!ctx.llmClient) {
-    await ctx.logger.info(`Allowed edit (no LLM): ${ctx.filePath}`)
-    return
-  }
-
   const result = await verifyEdit({
     client: ctx.llmClient,
     model: ctx.config.verifierModel,
@@ -133,7 +198,6 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
       }
 
       const filePath = output.args.filePath as string
-      console.log(`[TDD] Intercepted ${input.tool}: ${filePath}`)
 
       const configResult = await loadConfig(projectRoot)
       if (configResult.kind === 'missing') {
@@ -158,7 +222,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         config: configResult.config,
         testOutput,
         logger,
-        llmClient: getLlmClient(client),
+        llmClient: resolveLlmClient(client, input.sessionID),
       })
     },
   }

@@ -1,8 +1,12 @@
-# Architecture: opencode-tdd SDK E2E
+# Architecture: opencode-tdd
 
 ## Problem Statement
 
-Add SDK-driven end-to-end tests that start an opencode server/client programmatically, trigger an edit via prompt, and verify the TDD plugin allow/block behavior by observing log output.
+Enforce TDD for AI coding agents by intercepting edit/write operations and blocking them unless the Red-Green-Refactor cycle is followed.
+
+## E2E Testing Strategy
+
+SDK-driven end-to-end tests start an opencode server/client programmatically, trigger an edit via prompt, and verify the TDD plugin allow/block behavior by observing log output.
 
 ## Key Decisions
 
@@ -14,8 +18,43 @@ Add SDK-driven end-to-end tests that start an opencode server/client programmati
   - SSE `session.idle` event signals completion
   - Subscribe to SSE **before** calling `promptAsync()` to avoid missing events
 - Assert outcomes via `.opencode/tdd/tdd.log` contents
-- Avoid LLM variability: use missing test output for block, single FAIL for allow
 - Use `Promise.race(log polling, session.idle)` for reliability when plugin blocks before LLM runs
+
+## Plugin LLM Access
+
+The plugin needs to make LLM calls for GREEN phase verification. Key insight:
+
+- The `client` passed to plugins is **always available** (not optional in `PluginInput`)
+- It's an OpenCode SDK client with `session.create` and `session.prompt` methods
+- **Do NOT use raw HTTP fetch** - the server API is internal and undocumented
+- Use the SDK client to create child sessions for verification:
+
+```typescript
+// Create child session
+const result = await client.session.create({
+  body: { title: 'TDD Verifier', parent: parentSessionId },
+})
+
+// Send prompt and wait for response
+const response = await client.session.prompt({
+  path: { id: childId },
+  body: {
+    model: { providerID, modelID },
+    parts: [{ type: 'text', text: prompt }],
+  },
+})
+
+// Extract text from response.data.parts
+// Clean up child session when done
+```
+
+This approach:
+
+- Works reliably in E2E tests
+- Reuses the same model/provider configuration
+- Properly integrates with OpenCode's session management
+
+For unit tests, inject a mock client with a `chat` method - the plugin detects this and uses it directly instead of the SDK adapter.
 
 ## Test Isolation Strategy
 
