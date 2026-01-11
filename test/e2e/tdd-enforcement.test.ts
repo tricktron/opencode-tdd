@@ -11,31 +11,27 @@ const auditPath = join(fixtureRoot, '.opencode/tdd/audit.jsonl')
 const EVENT_WAIT_TIMEOUT_MS = 20000
 const TEST_TIMEOUT_MS = 25000
 
-type ToolErrorEvent = {
-  type: 'message.part.updated'
-  properties: {
-    part: {
-      sessionID: string
-      type: 'tool'
-      tool: string
-      state: {
-        status: 'error'
-        error: string
-      }
-    }
-  }
-}
-
 type EventStream = AsyncGenerator<{
   type: string
   properties: unknown
 }>
 
+type ToolEvent = {
+  properties: {
+    part?: {
+      sessionID?: string
+      type?: string
+      tool?: string
+      state?: { status?: string; error?: string }
+    }
+  }
+}
+
 const waitForToolError = async (
   stream: EventStream,
   sessionId: string,
   errorPattern: string,
-): Promise<ToolErrorEvent> => {
+): Promise<void> => {
   const start = Date.now()
   for await (const event of stream) {
     if (Date.now() - start > EVENT_WAIT_TIMEOUT_MS) {
@@ -43,16 +39,15 @@ const waitForToolError = async (
     }
 
     if (event.type === 'message.part.updated') {
-      const toolEvent = event as unknown as ToolErrorEvent
+      const { part } = (event as unknown as ToolEvent).properties
       if (
-        toolEvent.properties.part?.sessionID === sessionId &&
-        toolEvent.properties.part?.type === 'tool' &&
-        (toolEvent.properties.part?.tool === 'edit' ||
-          toolEvent.properties.part?.tool === 'write') &&
-        toolEvent.properties.part?.state?.status === 'error' &&
-        toolEvent.properties.part?.state?.error?.includes(errorPattern)
+        part?.sessionID === sessionId &&
+        part?.type === 'tool' &&
+        (part?.tool === 'edit' || part?.tool === 'write') &&
+        part?.state?.status === 'error' &&
+        part?.state?.error?.includes(errorPattern)
       ) {
-        return toolEvent
+        return
       }
     }
   }
@@ -106,7 +101,6 @@ interface TestContext {
   setupTestOutput: () => Promise<void>
   expectedErrorPattern?: string
   shouldSucceed?: boolean
-  errorAssertions?: (error: ToolErrorEvent) => void
 }
 
 const runTddPluginTest = async (ctx: TestContext) => {
@@ -147,14 +141,11 @@ const runTddPluginTest = async (ctx: TestContext) => {
     })
 
     if (ctx.expectedErrorPattern) {
-      const errorEvent = await waitForToolError(
+      await waitForToolError(
         stream as EventStream,
         sessionId,
         ctx.expectedErrorPattern,
       )
-      if (ctx.errorAssertions) {
-        ctx.errorAssertions(errorEvent)
-      }
     } else if (ctx.shouldSucceed) {
       await waitForSessionIdle(stream as EventStream, sessionId)
     }
@@ -174,9 +165,6 @@ describe('SDK E2E', () => {
       runTddPluginTest({
         setupTestOutput: () => rm(testOutputPath, { force: true }),
         expectedErrorPattern: 'Run tests first',
-        errorAssertions: (error) => {
-          expect(error.properties.part.state.error).toContain('Run tests first')
-        },
       }),
     TEST_TIMEOUT_MS,
   )
@@ -189,21 +177,6 @@ describe('SDK E2E', () => {
           await Bun.write(testOutputPath, '1 test FAIL')
         },
         shouldSucceed: true,
-      }),
-    TEST_TIMEOUT_MS,
-  )
-
-  test.skip(
-    'blocks non-test edit when all tests pass (flaky due to LLM non-determinism)',
-    () =>
-      runTddPluginTest({
-        setupTestOutput: async () => {
-          await Bun.write(testOutputPath, 'PASS all tests')
-        },
-        expectedErrorPattern: 'TDD:',
-        errorAssertions: (error) => {
-          expect(error.properties.part.state.error).toContain('TDD:')
-        },
       }),
     TEST_TIMEOUT_MS,
   )
