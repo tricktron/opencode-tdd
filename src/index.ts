@@ -2,6 +2,7 @@ import type { Plugin } from '@opencode-ai/plugin'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import picomatch from 'picomatch'
+import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
 import { createLogger, type Logger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
@@ -149,6 +150,7 @@ type TDDContext = {
   testOutput: string
   logger: Logger
   llmClient: LlmClient
+  auditor: Auditor
 }
 
 const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
@@ -177,6 +179,7 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
     filePath: ctx.filePath,
     editContent: ctx.editContent,
     testOutput: ctx.testOutput,
+    auditor: ctx.auditor,
   })
 
   if (!result.allowed) {
@@ -190,6 +193,7 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
   const projectRoot = directory ?? process.cwd()
   const logger = createLogger(projectRoot)
+  const auditor = createAuditor(projectRoot)
 
   return {
     'tool.execute.before': async (input, output) => {
@@ -223,6 +227,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         testOutput,
         logger,
         llmClient: resolveLlmClient(client, input.sessionID),
+        auditor,
       })
     },
   }
