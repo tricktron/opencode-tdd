@@ -4,7 +4,6 @@ import { join } from 'node:path'
 export type AuditEntry = {
   timestamp: string
   filePath: string
-  phase: 'GREEN' | 'RED'
   prompt: string
   response: string
   decision: 'allow' | 'block'

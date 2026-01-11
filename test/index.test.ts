@@ -625,7 +625,6 @@ describe('Auditor', () => {
     await auditor.record({
       timestamp: '2024-01-15T10:00:00.000Z',
       filePath: 'src/example.ts',
-      phase: 'GREEN',
       prompt: 'test prompt',
       response: 'test response',
       decision: 'allow',
@@ -639,7 +638,6 @@ describe('Auditor', () => {
     expect(entry).toEqual({
       timestamp: '2024-01-15T10:00:00.000Z',
       filePath: 'src/example.ts',
-      phase: 'GREEN',
       prompt: 'test prompt',
       response: 'test response',
       decision: 'allow',
@@ -655,7 +653,6 @@ describe('Auditor', () => {
     await auditor.record({
       timestamp: '2024-01-15T10:00:00.000Z',
       filePath: 'src/first.ts',
-      phase: 'GREEN',
       prompt: 'first',
       response: 'first',
       decision: 'allow',
@@ -664,7 +661,6 @@ describe('Auditor', () => {
     await auditor.record({
       timestamp: '2024-01-15T10:01:00.000Z',
       filePath: 'src/second.ts',
-      phase: 'GREEN',
       prompt: 'second',
       response: 'second',
       decision: 'block',
@@ -691,7 +687,6 @@ describe('Auditor', () => {
     await auditor.record({
       timestamp: '2024-01-15T10:00:00.000Z',
       filePath: 'src/example.ts',
-      phase: 'GREEN',
       prompt: 'test',
       response: 'test',
       decision: 'allow',
@@ -724,7 +719,6 @@ describe('Auditor', () => {
     const entry = JSON.parse(auditContent.trim())
 
     expect(entry.filePath).toBe('src/example.ts')
-    expect(entry.phase).toBe('GREEN')
     expect(entry.decision).toBe('allow')
     expect(entry.prompt).toContain('src/example.ts')
     expect(entry.response).toContain('impl')
@@ -750,7 +744,6 @@ describe('Verification Audit', () => {
 
     expect(entry).toMatchObject({
       filePath: 'src/example.ts',
-      phase: 'GREEN',
       decision: 'allow',
     })
     expect(entry.timestamp).toBeDefined()
@@ -795,7 +788,6 @@ describe('Verification Audit', () => {
       /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
     )
     expect(entry.filePath).toBe('src/example.ts')
-    expect(entry.phase).toBe('GREEN')
     expect(entry.prompt).toContain('src/example.ts')
     expect(entry.response).toContain('impl')
     expect(entry.decision).toBe('block')
