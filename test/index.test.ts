@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
 import { verifyEdit } from '../src/verifier'
-import { createLogger } from '../src/logger'
 
 const mockClient = (response: string | (() => never)) => ({
   chat: async () => {
@@ -22,45 +21,10 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 describe('Verifier', () => {
-  const verifierTests = [
-    {
-      name: 'given LLM API failure, blocks with helpful error message',
-      response: () => {
-        throw new Error('Network error')
-      },
-      expected: {
-        allowed: false,
-        reason: 'Verification failed: Network error',
-      },
-    },
-    {
-      name: 'given invalid JSON response, blocks with Invalid verifier response',
-      response: 'not valid json',
-      expected: {
-        allowed: false,
-        reason:
-          'Invalid verifier response: Invalid verifier response (not valid json)',
-      },
-    },
+  const allowTests = [
     {
       name: 'given JSON wrapped in markdown code block, extracts and parses correctly',
       response: '```json\n{"decision": "allow"}\n```',
-      expected: { allowed: true },
-    },
-    {
-      name: 'given missing decision field, treats as block',
-      response: JSON.stringify({ reason: 'some reason' }),
-      expected: { allowed: false, reason: 'some reason' },
-    },
-    {
-      name: 'given invalid decision value like maybe, treats as block',
-      response: JSON.stringify({ decision: 'maybe', reason: 'not sure' }),
-      expected: { allowed: false, reason: 'not sure' },
-    },
-    {
-      name: 'given missing reason field when blocking, uses default reason',
-      response: JSON.stringify({ decision: 'block' }),
-      expected: { allowed: false, reason: 'Write a failing test first' },
     },
     {
       name: 'given editType test, allows edit regardless of decision',
@@ -69,92 +33,66 @@ describe('Verifier', () => {
         decision: 'block',
         reason: 'ignored',
       }),
-      expected: { allowed: true },
     },
     {
       name: 'given editType impl and decision allow, allows edit',
       response: JSON.stringify({ editType: 'impl', decision: 'allow' }),
-      expected: { allowed: true },
+    },
+  ]
+
+  for (const tc of allowTests) {
+    test(tc.name, async () => {
+      await verifyEdit(verifyOpts(mockClient(tc.response)))
+      // No throw = success
+    })
+  }
+
+  const blockTests = [
+    {
+      name: 'given LLM API failure, throws with helpful error message',
+      response: () => {
+        throw new Error('Network error')
+      },
+      expectedError: 'Verification failed: Network error',
     },
     {
-      name: 'given editType impl and decision block, blocks with reason',
+      name: 'given invalid JSON response, throws with Invalid verifier response',
+      response: 'not valid json',
+      expectedError: 'Invalid verifier response',
+    },
+    {
+      name: 'given missing decision field, throws with reason',
+      response: JSON.stringify({ reason: 'some reason' }),
+      expectedError: 'some reason',
+    },
+    {
+      name: 'given invalid decision value like maybe, throws with reason',
+      response: JSON.stringify({ decision: 'maybe', reason: 'not sure' }),
+      expectedError: 'not sure',
+    },
+    {
+      name: 'given missing reason field when blocking, throws with default reason',
+      response: JSON.stringify({ decision: 'block' }),
+      expectedError: 'Write a failing test first',
+    },
+    {
+      name: 'given editType impl and decision block, throws with reason',
       response: JSON.stringify({
         editType: 'impl',
         decision: 'block',
         reason: 'Write test first',
       }),
-      expected: { allowed: false, reason: 'Write test first' },
+      expectedError: 'Write test first',
     },
-  ] as const
+  ]
 
-  for (const tc of verifierTests) {
+  for (const tc of blockTests) {
     test(tc.name, async () => {
-      const result = await verifyEdit(verifyOpts(mockClient(tc.response)))
-      expect(result).toEqual(tc.expected)
+      await expect(
+        verifyEdit(verifyOpts(mockClient(tc.response))),
+      ).rejects.toThrow(tc.expectedError)
     })
   }
-})
-
-describe('Logger', () => {
-  test('given allowed edit, logs INFO with file path', async () => {
-    const projectRoot = await createProjectRoot()
-    const logger = createLogger(projectRoot)
-
-    await logger.info('Allowed edit: src/example.ts')
-
-    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
-    const logContent = await readFile(logPath, 'utf8')
-    expect(logContent).toContain('[INFO] Allowed edit: src/example.ts')
-  })
-
-  test('given blocked edit, logs WARN with reason', async () => {
-    const projectRoot = await createProjectRoot()
-    const logger = createLogger(projectRoot)
-
-    await logger.warn('Blocked: Write a failing test first')
-
-    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
-    const logContent = await readFile(logPath, 'utf8')
-    expect(logContent).toContain('[WARN] Blocked: Write a failing test first')
-  })
-
-  test('given test output error, logs ERROR with details', async () => {
-    const projectRoot = await createProjectRoot()
-    const logger = createLogger(projectRoot)
-
-    await logger.error('Test output missing')
-
-    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
-    const logContent = await readFile(logPath, 'utf8')
-    expect(logContent).toContain('[ERROR] Test output missing')
-  })
-
-  test('given any log entry, includes ISO timestamp', async () => {
-    const projectRoot = await createProjectRoot()
-    const logger = createLogger(projectRoot)
-
-    await logger.info('test message')
-
-    const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
-    const logContent = await readFile(logPath, 'utf8')
-    // ISO timestamp format: 2024-01-15T10:30:00.000Z
-    expect(logContent).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]/)
-  })
-
-  test('given existing log file, appends instead of overwriting', async () => {
-    const projectRoot = await createProjectRoot()
-    const logDir = join(projectRoot, '.opencode', 'tdd')
-    await mkdir(logDir, { recursive: true })
-    const logPath = join(logDir, 'tdd.log')
-    await writeFile(logPath, 'existing content\n')
-
-    const logger = createLogger(projectRoot)
-    await logger.info('new message')
-
-    const logContent = await readFile(logPath, 'utf8')
-    expect(logContent).toContain('existing content')
-    expect(logContent).toContain('[INFO] new message')
-  })
 })
 
 describe('Edge Cases', () => {
@@ -475,15 +413,6 @@ describe('TDDPlugin', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('logs INFO when edit is allowed', async () => {
-    const { projectRoot, hook } = await setupRedPhase()
-    await callHook(hook, 'edit', 'src/example.ts')
-
-    const logContent = await readLog(projectRoot)
-    expect(logContent).toContain('[INFO]')
-    expect(logContent).toContain('src/example.ts')
-  })
-
   test('blocks when config has invalid JSON', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfigRaw(projectRoot, '{')
@@ -542,43 +471,12 @@ describe('TDDPlugin', () => {
     )
   })
 
-  test('logs ERROR when test output is missing', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-
-    const hook = await getHook(projectRoot)
-
-    try {
-      await callHook(hook, 'edit', 'src/example.ts')
-    } catch {
-      // Expected to throw
-    }
-
-    const logContent = await readLog(projectRoot)
-    expect(logContent).toContain('[ERROR]')
-    expect(logContent).toContain('Run tests first')
-  })
-
   test('blocks when test output is stale', async () => {
     const { hook } = await setupStaleTestOutput(2, 1)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD: Re-run tests',
     )
-  })
-
-  test('logs ERROR when test output is stale', async () => {
-    const { projectRoot, hook } = await setupStaleTestOutput(2, 1)
-
-    try {
-      await callHook(hook, 'edit', 'src/example.ts')
-    } catch {
-      // Expected to throw
-    }
-
-    const logContent = await readLog(projectRoot)
-    expect(logContent).toContain('[ERROR]')
-    expect(logContent).toContain('Re-run tests')
   })
 
   test('uses default maxTestOutputAge when stale', async () => {
@@ -613,23 +511,6 @@ describe('TDDPlugin', () => {
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD: Write a failing test first',
     )
-  })
-
-  test('logs WARN when edit is blocked', async () => {
-    const { projectRoot, hook } = await setupGreenPhase({
-      decision: 'block',
-      reason: 'Write a failing test first',
-    })
-
-    try {
-      await callHook(hook, 'edit', 'src/example.ts')
-    } catch {
-      // Expected to throw
-    }
-
-    const logContent = await readLog(projectRoot)
-    expect(logContent).toContain('[WARN]')
-    expect(logContent).toContain('Write a failing test first')
   })
 
   test('skips verification for non-edit tools', async () => {
@@ -684,11 +565,6 @@ const getHook = async (projectRoot: string, client?: unknown) => {
   }
 
   return hook
-}
-
-const readLog = async (projectRoot: string) => {
-  const logPath = join(projectRoot, '.opencode', 'tdd', 'tdd.log')
-  return readFile(logPath, 'utf8')
 }
 
 type Hook = Awaited<ReturnType<typeof TDDPlugin>>['tool.execute.before']
