@@ -1,3 +1,5 @@
+import type { Auditor } from './auditor'
+
 export type LlmClient = {
   chat: (
     model: string,
@@ -13,6 +15,7 @@ export type VerifyEditOptions = {
   filePath: string
   editContent: string
   testOutput: string
+  auditor?: Auditor
 }
 
 const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier.
@@ -59,6 +62,8 @@ const parseResponse = (response: string): ParsedResponse => {
 export const verifyEdit = async (
   opts: VerifyEditOptions,
 ): Promise<VerifyResult> => {
+  const prompt = `File: ${opts.filePath}\nEdit Content:\n${opts.editContent}\n\nTest Output:\n${opts.testOutput}`
+
   let response: string
   try {
     response = await opts.client.chat(opts.model, [
@@ -68,7 +73,7 @@ export const verifyEdit = async (
       },
       {
         role: 'user',
-        content: `File: ${opts.filePath}\nEdit Content:\n${opts.editContent}\n\nTest Output:\n${opts.testOutput}`,
+        content: prompt,
       },
     ])
   } catch (error) {
@@ -78,6 +83,30 @@ export const verifyEdit = async (
 
   try {
     const parsed = parseResponse(response)
+    const decision =
+      parsed.editType === 'test' || parsed.decision === 'allow'
+        ? 'allow'
+        : 'block'
+    const reason =
+      parsed.reason ??
+      (decision === 'block' ? 'Write a failing test first' : '')
+
+    if (opts.auditor) {
+      try {
+        await opts.auditor.record({
+          timestamp: new Date().toISOString(),
+          filePath: opts.filePath,
+          phase: 'GREEN',
+          prompt,
+          response,
+          decision,
+          reason,
+        })
+      } catch {
+        // Audit failure should not affect verification
+      }
+    }
+
     if (parsed.editType === 'test') {
       return { allowed: true }
     }

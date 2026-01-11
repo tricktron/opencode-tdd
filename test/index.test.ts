@@ -739,3 +739,215 @@ const setupStaleTestOutput = async (ageSeconds: number, maxAge?: number) => {
   const hook = await getHook(projectRoot)
   return { projectRoot, hook }
 }
+
+describe('Auditor', () => {
+  test('given audit entry, when recorded, then writes valid JSONL', async () => {
+    const projectRoot = await createProjectRoot()
+    const { createAuditor } = await import('../src/auditor')
+    const auditor = createAuditor(projectRoot)
+
+    await auditor.record({
+      timestamp: '2024-01-15T10:00:00.000Z',
+      filePath: 'src/example.ts',
+      phase: 'GREEN',
+      prompt: 'test prompt',
+      response: 'test response',
+      decision: 'allow',
+      reason: 'test reason',
+    })
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry).toEqual({
+      timestamp: '2024-01-15T10:00:00.000Z',
+      filePath: 'src/example.ts',
+      phase: 'GREEN',
+      prompt: 'test prompt',
+      response: 'test response',
+      decision: 'allow',
+      reason: 'test reason',
+    })
+  })
+
+  test('given multiple entries, when recorded, then appends to file', async () => {
+    const projectRoot = await createProjectRoot()
+    const { createAuditor } = await import('../src/auditor')
+    const auditor = createAuditor(projectRoot)
+
+    await auditor.record({
+      timestamp: '2024-01-15T10:00:00.000Z',
+      filePath: 'src/first.ts',
+      phase: 'GREEN',
+      prompt: 'first',
+      response: 'first',
+      decision: 'allow',
+      reason: 'first',
+    })
+    await auditor.record({
+      timestamp: '2024-01-15T10:01:00.000Z',
+      filePath: 'src/second.ts',
+      phase: 'GREEN',
+      prompt: 'second',
+      response: 'second',
+      decision: 'block',
+      reason: 'second',
+    })
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const lines = auditContent.trim().split('\n')
+
+    expect(lines).toHaveLength(2)
+    const first = JSON.parse(lines[0])
+    const second = JSON.parse(lines[1])
+
+    expect(first.filePath).toBe('src/first.ts')
+    expect(second.filePath).toBe('src/second.ts')
+  })
+
+  test('given missing audit directory, when first entry recorded, then creates directory and file', async () => {
+    const projectRoot = await createProjectRoot()
+    const { createAuditor } = await import('../src/auditor')
+    const auditor = createAuditor(projectRoot)
+
+    await auditor.record({
+      timestamp: '2024-01-15T10:00:00.000Z',
+      filePath: 'src/example.ts',
+      phase: 'GREEN',
+      prompt: 'test',
+      response: 'test',
+      decision: 'allow',
+      reason: 'test',
+    })
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    expect(auditContent).toBeTruthy()
+  })
+
+  test('given verifyEdit with auditor, when called, then records audit entry', async () => {
+    const projectRoot = await createProjectRoot()
+    const { createAuditor } = await import('../src/auditor')
+    const auditor = createAuditor(projectRoot)
+
+    await verifyEdit({
+      client: mockClient(
+        JSON.stringify({ editType: 'impl', decision: 'allow' }),
+      ),
+      model: 'test-model',
+      filePath: 'src/example.ts',
+      editContent: 'const x = 1',
+      testOutput: 'PASS all tests',
+      auditor,
+    })
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry.filePath).toBe('src/example.ts')
+    expect(entry.phase).toBe('GREEN')
+    expect(entry.decision).toBe('allow')
+    expect(entry.prompt).toContain('src/example.ts')
+    expect(entry.response).toContain('impl')
+  })
+})
+
+describe('Verification Audit', () => {
+  test('given GREEN phase verification, when LLM is called, then audit entry is written', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+    )
+
+    await callHook(hook, 'edit', 'src/example.ts')
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry).toMatchObject({
+      filePath: 'src/example.ts',
+      phase: 'GREEN',
+      decision: 'allow',
+    })
+    expect(entry.timestamp).toBeDefined()
+    expect(entry.prompt).toBeDefined()
+    expect(entry.response).toBeDefined()
+  })
+
+  test('given RED phase (1 failing test), when edit is allowed, then no audit entry is written', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
+
+    const hook = await getHook(projectRoot)
+
+    await callHook(hook, 'edit', 'src/example.ts')
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    await expect(() => readFile(auditPath, 'utf8')).toThrow()
+  })
+
+  test('given audit entry, when I read the file, then I see all required fields', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        decision: 'block',
+        reason: 'test reason',
+      }),
+    )
+
+    await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow()
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry.timestamp).toMatch(
+      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
+    )
+    expect(entry.filePath).toBe('src/example.ts')
+    expect(entry.phase).toBe('GREEN')
+    expect(entry.prompt).toContain('src/example.ts')
+    expect(entry.response).toContain('impl')
+    expect(entry.decision).toBe('block')
+    expect(entry.reason).toBe('test reason')
+  })
+
+  test('given multiple verifications, when I read the audit file, then entries are appended', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+    )
+
+    await callHook(hook, 'edit', 'src/first.ts')
+    await callHook(hook, 'edit', 'src/second.ts')
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const lines = auditContent.trim().split('\n')
+
+    expect(lines).toHaveLength(2)
+    const first = JSON.parse(lines[0])
+    const second = JSON.parse(lines[1])
+
+    expect(first.filePath).toBe('src/first.ts')
+    expect(second.filePath).toBe('src/second.ts')
+  })
+})
