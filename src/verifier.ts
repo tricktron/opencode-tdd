@@ -84,7 +84,6 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
       await opts.auditor.record({
         timestamp: new Date().toISOString(),
         filePath: opts.filePath,
-        phase: 'GREEN',
         prompt,
         response,
         decision,

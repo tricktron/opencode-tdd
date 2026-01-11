@@ -47,6 +47,34 @@ The plugin reads your test output file and enforces this state machine:
 | GREEN   | 0 failing tests  | Test edits only (LLM classifies) |
 | BLOCKED | 2+ failing tests | Must fix existing test first     |
 
+## Verification Audit
+
+During GREEN phase, an LLM classifies edits as test or implementation code.
+Since LLMs are non-deterministic, all verification decisions are logged to
+`.opencode/tdd/audit.jsonl`:
+
+```jsonl
+{
+  "timestamp": "2026-01-11T10:30:00Z",
+  "filePath": "src/foo.ts",
+  "prompt": "...",
+  "response": "...",
+  "decision": "block",
+  "reason": "Write a failing test first"
+}
+```
+
+Each entry contains:
+
+- `timestamp` - When verification occurred
+- `filePath` - File being edited
+- `prompt` - What was sent to the LLM
+- `response` - Raw LLM response
+- `decision` - "allow" or "block"
+- `reason` - Why the decision was made
+
+Use this to debug unexpected blocks or tune your workflow.
+
 ## Development
 
 ```bash
