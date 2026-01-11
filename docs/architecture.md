@@ -6,7 +6,7 @@ Enforce TDD for AI coding agents by intercepting edit/write operations and block
 
 ## E2E Testing Strategy
 
-SDK-driven end-to-end tests start an opencode server/client programmatically, trigger an edit via prompt, and verify the TDD plugin allow/block behavior by observing log output.
+SDK-driven end-to-end tests start an opencode server/client programmatically, trigger an edit via prompt, and verify the TDD plugin allow/block behavior by observing SDK events (`message.part.updated` with error status).
 
 ## Key Decisions
 
@@ -17,8 +17,7 @@ SDK-driven end-to-end tests start an opencode server/client programmatically, tr
   - `promptAsync()` returns HTTP 204 immediately, prompt runs in background
   - SSE `session.idle` event signals completion
   - Subscribe to SSE **before** calling `promptAsync()` to avoid missing events
-- Assert outcomes via `.opencode/tdd/tdd.log` contents
-- Use `Promise.race(log polling, session.idle)` for reliability when plugin blocks before LLM runs
+- Assert outcomes via SDK events (tool errors surface in `message.part.updated` with `state.status: "error"`)
 
 ## Plugin LLM Access
 
@@ -63,7 +62,6 @@ To ensure tests can run together without side effects:
 - **Random port allocation**: Use `port: 0` to let OS assign available ports
 - **Clean shared state**: `afterEach` hook restores fixture state:
   - Git restore source files that LLM may edit
-  - Remove log files (`.opencode/tdd/tdd.log`)
   - Remove test output files (`.opencode/tdd/smoke-test-output.txt`)
 - **Process cwd restoration**: Always restore in `finally` blocks
 - **Server cleanup**: Always close server in `finally` blocks

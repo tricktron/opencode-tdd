@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
-import { createLogger, type Logger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
 
 const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
@@ -20,20 +19,6 @@ const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
   }
 
   return readFile(testOutputPath, 'utf8')
-}
-
-const getTestOutputWithLogging = async (
-  projectRoot: string,
-  config: TDDConfig,
-  logger: Logger,
-) => {
-  try {
-    return await getTestOutput(projectRoot, config)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    await logger.error(message.replace('TDD: ', ''))
-    throw err
-  }
 }
 
 type SdkClient = {
@@ -148,7 +133,6 @@ type TDDContext = {
   editContent: string
   config: TDDConfig
   testOutput: string
-  logger: Logger
   llmClient: LlmClient
   auditor: Auditor
 }
@@ -157,14 +141,10 @@ const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
   const failCount = countFailingTests(ctx.testOutput)
 
   if (failCount > 1) {
-    await ctx.logger.warn(
-      `Blocked: Fix existing failing test first - ${ctx.filePath}`,
-    )
     throw new Error('TDD: Fix existing failing test first')
   }
 
   if (failCount === 1) {
-    await ctx.logger.info(`Allowed edit (RED): ${ctx.filePath}`)
     return
   }
 
@@ -173,26 +153,23 @@ const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
 }
 
 const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
-  const result = await verifyEdit({
-    client: ctx.llmClient,
-    model: ctx.config.verifierModel,
-    filePath: ctx.filePath,
-    editContent: ctx.editContent,
-    testOutput: ctx.testOutput,
-    auditor: ctx.auditor,
-  })
-
-  if (!result.allowed) {
-    await ctx.logger.warn(`Blocked: ${result.reason} - ${ctx.filePath}`)
-    throw new Error(`TDD: ${result.reason}`)
+  try {
+    await verifyEdit({
+      client: ctx.llmClient,
+      model: ctx.config.verifierModel,
+      filePath: ctx.filePath,
+      editContent: ctx.editContent,
+      testOutput: ctx.testOutput,
+      auditor: ctx.auditor,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`TDD: ${message}`)
   }
-
-  await ctx.logger.info(`Allowed edit (verified): ${ctx.filePath}`)
 }
 
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
   const projectRoot = directory ?? process.cwd()
-  const logger = createLogger(projectRoot)
   const auditor = createAuditor(projectRoot)
 
   return {
@@ -212,11 +189,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const testOutput = await getTestOutputWithLogging(
-        projectRoot,
-        configResult.config,
-        logger,
-      )
+      const testOutput = await getTestOutput(projectRoot, configResult.config)
 
       const editContent = getEditContent(input.tool, output.args)
 
@@ -225,7 +198,6 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         editContent,
         config: configResult.config,
         testOutput,
-        logger,
         llmClient: resolveLlmClient(client, input.sessionID),
         auditor,
       })

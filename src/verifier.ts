@@ -7,8 +7,6 @@ export type LlmClient = {
   ) => Promise<string>
 }
 
-type VerifyResult = { allowed: true } | { allowed: false; reason: string }
-
 export type VerifyEditOptions = {
   client: LlmClient
   model: string
@@ -59,69 +57,49 @@ const parseResponse = (response: string): ParsedResponse => {
   }
 }
 
-export const verifyEdit = async (
-  opts: VerifyEditOptions,
-): Promise<VerifyResult> => {
+export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
   const prompt = `File: ${opts.filePath}\nEdit Content:\n${opts.editContent}\n\nTest Output:\n${opts.testOutput}`
 
   let response: string
   try {
     response = await opts.client.chat(opts.model, [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT,
-      },
-      {
-        role: 'user',
-        content: prompt,
-      },
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
     ])
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
-    return { allowed: false, reason: `Verification failed: ${message}` }
+    throw new Error(`Verification failed: ${message}`)
   }
 
-  try {
-    const parsed = parseResponse(response)
-    const decision =
-      parsed.editType === 'test' || parsed.decision === 'allow'
-        ? 'allow'
-        : 'block'
-    const reason =
-      parsed.reason ??
-      (decision === 'block' ? 'Write a failing test first' : '')
+  const parsed = parseResponse(response)
+  const decision =
+    parsed.editType === 'test' || parsed.decision === 'allow'
+      ? 'allow'
+      : 'block'
+  const reason =
+    parsed.reason ?? (decision === 'block' ? 'Write a failing test first' : '')
 
-    if (opts.auditor) {
-      try {
-        await opts.auditor.record({
-          timestamp: new Date().toISOString(),
-          filePath: opts.filePath,
-          phase: 'GREEN',
-          prompt,
-          response,
-          decision,
-          reason,
-        })
-      } catch {
-        // Audit failure should not affect verification
-      }
+  if (opts.auditor) {
+    try {
+      await opts.auditor.record({
+        timestamp: new Date().toISOString(),
+        filePath: opts.filePath,
+        phase: 'GREEN',
+        prompt,
+        response,
+        decision,
+        reason,
+      })
+    } catch {
+      // Audit failure should not affect verification
     }
+  }
 
-    if (parsed.editType === 'test') {
-      return { allowed: true }
-    }
-    if (parsed.decision !== 'allow') {
-      return {
-        allowed: false,
-        reason: parsed.reason ?? 'Write a failing test first',
-      }
-    }
-    return { allowed: true }
-  } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    return {
-      allowed: false,
-      reason: `Invalid verifier response: ${errorMsg} (${response.substring(0, 100)})`,
-    }
+  if (parsed.editType === 'test') {
+    return
+  }
+
+  if (parsed.decision !== 'allow') {
+    throw new Error(parsed.reason ?? 'Write a failing test first')
   }
 }
