@@ -55,6 +55,10 @@ This approach:
 
 For unit tests, inject a mock client with a `chat` method - the plugin detects this and uses it directly instead of the SDK adapter.
 
+## Observability
+
+Non-fatal errors are logged via `client.app.log()` using the `safeLog` helper in `src/logger.ts`. Log levels: error (config failures), warn (audit failures), debug (session cleanup). Logging never throws and handles missing logger gracefully.
+
 ## Test Isolation Strategy
 
 To ensure tests can run together without side effects:

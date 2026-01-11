@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
+import { formatError, safeLog, type AppLogger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
 
 const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
@@ -38,6 +39,7 @@ type SdkClient = {
     }>
     delete: (opts: { path: { id: string } }) => Promise<unknown>
   }
+  app: AppLogger
 }
 
 const createSdkAdapter = (
@@ -85,7 +87,19 @@ const createSdkAdapter = (
 
       return response
     } finally {
-      await sdkClient.session.delete({ path: { id: childId } }).catch(() => {})
+      await sdkClient.session
+        .delete({ path: { id: childId } })
+        .catch((error) => {
+          safeLog(
+            sdkClient.app,
+            'debug',
+            'Failed to clean up verification session',
+            {
+              sessionId: childId,
+              error: formatError(error),
+            },
+          )
+        })
     }
   },
 })
@@ -168,9 +182,26 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
   }
 }
 
+const loadConfigWithLogging = async (
+  projectRoot: string,
+  logger: AppLogger | undefined,
+) => {
+  try {
+    return await loadConfig(projectRoot)
+  } catch (error) {
+    safeLog(logger, 'error', 'Config parse failed', {
+      configPath: join(projectRoot, '.opencode', 'tdd.json'),
+      error: formatError(error),
+    })
+    throw error
+  }
+}
+
 export const TDDPlugin: Plugin = async ({ client, directory }) => {
   const projectRoot = directory ?? process.cwd()
   const auditor = createAuditor(projectRoot)
+  const sdkClient = client as SdkClient | undefined
+  const logger = sdkClient?.app
 
   return {
     'tool.execute.before': async (input, output) => {
@@ -180,7 +211,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
 
       const filePath = output.args.filePath as string
 
-      const configResult = await loadConfig(projectRoot)
+      const configResult = await loadConfigWithLogging(projectRoot, logger)
       if (configResult.kind === 'missing') {
         return
       }

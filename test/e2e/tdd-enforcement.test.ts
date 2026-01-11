@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, test } from 'bun:test'
+import { afterEach, beforeAll, describe, test } from 'bun:test'
 import { copyFile, mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createOpencode } from '@opencode-ai/sdk'
