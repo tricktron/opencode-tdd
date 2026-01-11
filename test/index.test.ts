@@ -725,6 +725,61 @@ describe('Auditor', () => {
   })
 })
 
+describe('Non-Blocking Error Handling', () => {
+  test('given audit write fails, verification still completes successfully', async () => {
+    const failingAuditor = {
+      record: async () => {
+        throw new Error('Disk full')
+      },
+    }
+
+    const mockClient = {
+      chat: async () => JSON.stringify({ editType: 'impl', decision: 'allow' }),
+    }
+
+    // Should not throw despite audit failure
+    await verifyEdit({
+      client: mockClient,
+      model: 'test-model',
+      filePath: 'src/example.ts',
+      editContent: 'const x = 1',
+      testOutput: 'PASS all tests',
+      auditor: failingAuditor,
+    })
+  })
+
+  test('given session cleanup fails, verification still completes successfully', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'PASS all tests')
+
+    const mockSdkClient = {
+      session: {
+        create: async () => ({ data: { id: 'test-session-id' } }),
+        prompt: async () => ({
+          data: {
+            parts: [
+              {
+                type: 'text',
+                text: JSON.stringify({ editType: 'impl', decision: 'allow' }),
+              },
+            ],
+          },
+        }),
+        delete: async () => {
+          throw new Error('Network timeout')
+        },
+      },
+      app: { log: async () => ({}) },
+    }
+
+    const hook = await getHook(projectRoot, mockSdkClient)
+
+    // Should not throw despite session cleanup failure
+    await callHook(hook, 'edit', 'src/example.ts')
+  })
+})
+
 describe('Verification Audit', () => {
   test('given GREEN phase verification, when LLM is called, then audit entry is written', async () => {
     const projectRoot = await createProjectRoot()

@@ -1,10 +1,12 @@
 import type { Auditor } from './auditor'
+import { formatError, safeLog, type AppLogger } from './logger'
 
 export type LlmClient = {
   chat: (
     model: string,
     messages: Array<{ role: string; content: string }>,
   ) => Promise<string>
+  app?: AppLogger
 }
 
 export type VerifyEditOptions = {
@@ -89,8 +91,12 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
         decision,
         reason,
       })
-    } catch {
-      // Audit failure should not affect verification
+    } catch (error) {
+      // Audit failure should not affect verification - log it
+      safeLog(opts.client.app, 'warn', 'Failed to write audit entry', {
+        filePath: opts.filePath,
+        error: formatError(error),
+      })
     }
   }
 
