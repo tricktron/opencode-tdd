@@ -83,11 +83,12 @@ The plugin supports outside-in TDD (GOOS style) where one "guiding" acceptance t
 
 ### Test Hierarchy
 
-| Level       | Scope                            | Rule                                    |
-| ----------- | -------------------------------- | --------------------------------------- |
-| Acceptance  | End-to-end, user-facing behavior | Max 1 red at a time, acts as north star |
-| Integration | Component interaction            | Strict TDD: 0 or 1 red                  |
-| Unit        | Single component isolation       | Strict TDD: 0 or 1 red                  |
+| Level      | Purpose                       | Rule                   |
+| ---------- | ----------------------------- | ---------------------- |
+| Acceptance | Guides the slice (north star) | Max 1 red at a time    |
+| Unit       | Drives implementation         | Strict TDD: 0 or 1 red |
+
+Only two categories. "Integration" is intentionally omitted - it's an overloaded term that adds conceptual mass without clear benefit. Tests that touch multiple modules are still "unit" tests in this model; what matters is whether they guide the slice or drive implementation.
 
 ### Decision Logic (LLM-based)
 
@@ -97,17 +98,17 @@ All edits go through the verifier LLM. No heuristic-based fast paths. The LLM:
 2. Classifies the edit (test/impl/refactor) and scope
 3. Applies rules:
    - `acceptanceFailingTests > 1` → block
-   - `innerFailingTests > 1` → block
+   - `unitFailingTests > 1` → block
    - Adding acceptance test while one is red → block
-   - Adding inner test while one is red → block
-   - Implementation with 0 inner failing tests → block (write test first)
-   - Implementation with 1 inner failing test → allow
+   - Adding unit test while one is red → block
+   - Implementation with 0 unit failing tests → block (write test first)
+   - Implementation with 1 unit failing test → allow
    - Modifying the red acceptance test → allow (refinement ok)
    - Refactoring → allow
 
 ### Why LLM-only
 
-- Acceptance vs inner test distinction requires understanding intent, not pattern matching
+- Acceptance vs unit test distinction requires understanding intent, not pattern matching
 - Test output formats vary across frameworks - LLM handles all
 - Single decision point, no brittle heuristics
 - Full test output already sent to verifier

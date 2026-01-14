@@ -26,27 +26,26 @@ Analyze the file edit and test output to determine:
 3. Apply outside-in TDD rules
 
 Test Scopes:
-- Acceptance: end-to-end user behavior (broader scope)
-- Integration: component interaction
-- Unit: single component isolation
-- When ambiguous, treat as inner test (stricter rule)
+- Acceptance: guides the slice, verifies user-facing behavior end-to-end
+- Unit: drives implementation, tests components in isolation or together
+- When ambiguous, treat as unit test (stricter rule)
 
 Outside-In TDD Rules:
 - acceptanceFailingTests > 1 → BLOCK
-- innerFailingTests > 1 → BLOCK
+- unitFailingTests > 1 → BLOCK
 - Adding acceptance test while one is red → BLOCK
-- Adding inner test while one is red → BLOCK
-- Implementation with 0 inner failing tests → BLOCK (write test first)
-- Implementation with 1 inner failing test → ALLOW
+- Adding unit test while one is red → BLOCK
+- Implementation with 0 unit failing tests → BLOCK (write test first)
+- Implementation with 1 unit failing test → ALLOW
 - Modifying the red acceptance test → ALLOW (refinement ok)
 - Refactoring → ALLOW
 
 Respond with JSON only (no markdown, no code blocks):
 {
   "editType": "test" | "impl" | "refactor",
-  "testScope": "acceptance" | "integration" | "unit" | undefined,
+  "testScope": "acceptance" | "unit" | undefined,
   "acceptanceFailingTests": number,
-  "innerFailingTests": number,
+  "unitFailingTests": number,
   "decision": "allow" | "block",
   "reason": "brief explanation"
 }
@@ -60,9 +59,9 @@ const extractJson = (response: string): string => {
 
 type ParsedResponse = {
   editType?: 'test' | 'impl' | 'refactor'
-  testScope?: 'acceptance' | 'integration' | 'unit'
+  testScope?: 'acceptance' | 'unit'
   acceptanceFailingTests?: number
-  innerFailingTests?: number
+  unitFailingTests?: number
   decision?: string
   reason?: string
 }
