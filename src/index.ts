@@ -104,8 +104,10 @@ const createSdkAdapter = (
   },
 })
 
-// For unit tests: check if client has a direct chat method (mock)
-// For real usage: always use SDK adapter
+// Resolves LlmClient from the Plugin's `client` parameter.
+// The Plugin interface from @opencode-ai/plugin doesn't allow custom parameters,
+// so unit tests inject a mock LlmClient (with `chat` method) via the same `client` param.
+// Duck-typing detects mock vs real SDK client at runtime - pragmatic given the constraint.
 const resolveLlmClient = (client: unknown, sessionId: string): LlmClient => {
   const mockClient = client as LlmClient | undefined
   if (mockClient && typeof mockClient.chat === 'function') {
@@ -134,14 +136,6 @@ const getEditContent = (
   return (args.newString as string) ?? ''
 }
 
-const countFailingTests = (testOutput: string): number => {
-  const failPatterns = [/\bFAIL\b/gi, /✗/g, /\bfailed\b/gi, /\bfailing\b/gi]
-  const matches = failPatterns.flatMap(
-    (pattern) => testOutput.match(pattern) ?? [],
-  )
-  return matches.length
-}
-
 type TDDContext = {
   filePath: string
   editContent: string
@@ -149,21 +143,6 @@ type TDDContext = {
   testOutput: string
   llmClient: LlmClient
   auditor: Auditor
-}
-
-const enforceOneFailingTestRule = async (ctx: TDDContext): Promise<void> => {
-  const failCount = countFailingTests(ctx.testOutput)
-
-  if (failCount > 1) {
-    throw new Error('TDD: Fix existing failing test first')
-  }
-
-  if (failCount === 1) {
-    return
-  }
-
-  // failCount === 0: GREEN phase - LLM classifies as test or impl edit
-  await verifyWithLlm(ctx)
 }
 
 const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
@@ -224,7 +203,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
 
       const editContent = getEditContent(input.tool, output.args)
 
-      await enforceOneFailingTestRule({
+      await verifyWithLlm({
         filePath,
         editContent,
         config: configResult.config,

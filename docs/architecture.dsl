@@ -1,28 +1,40 @@
-workspace "opencode-tdd SDK E2E" "SDK-driven e2e tests for TDD plugin" {
+workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
 
     !identifiers hierarchical
 
     model {
-        author = person "Plugin Author" "Maintains opencode-tdd plugin"
+        agent = person "AI Agent" "LLM-powered coding agent using OpenCode"
 
-        system = softwareSystem "opencode-tdd e2e suite" "Runs SDK-based e2e tests" {
-            runner = container "E2E Test Runner" "Bun tests using opencode SDK" "Bun + TypeScript"
-            server = container "OpenCode Server" "Server started by SDK" "opencode"
-            fixture = container "Fixture Workspace" "Project config + plugin + files" "Filesystem"
+        opencode = softwareSystem "OpenCode" "AI coding assistant platform" {
+            server = container "OpenCode Server" "Hosts plugins and manages sessions" "Node.js"
         }
 
-        author -> system.runner "Runs"
-        system.runner -> system.server "Starts and sends prompts"
-        system.server -> system.fixture "Loads config and plugin"
+        tddPlugin = softwareSystem "opencode-tdd Plugin" "Enforces outside-in TDD discipline" {
+            hook = container "Edit Hook" "Intercepts edit/write tool calls" "TypeScript"
+            verifier = container "LLM Verifier" "Classifies edits and enforces TDD rules" "TypeScript"
+            config = container "Config Loader" "Loads .opencode/tdd.json" "TypeScript"
+            auditor = container "Auditor" "Records verification decisions" "JSONL"
+        }
+
+        testRunner = softwareSystem "Test Runner" "External test framework (vitest, jest, etc.)" "External"
+
+        # Relationships
+        agent -> opencode.server "Sends prompts"
+        opencode.server -> tddPlugin.hook "Triggers before edit/write"
+        tddPlugin.hook -> tddPlugin.config "Loads patterns and settings"
+        tddPlugin.hook -> tddPlugin.verifier "Delegates classification"
+        tddPlugin.verifier -> opencode.server "Creates child session for LLM call"
+        tddPlugin.verifier -> tddPlugin.auditor "Records decision"
+        tddPlugin.hook -> testRunner "Reads test output file"
     }
 
     views {
-        systemContext system "Context" {
+        systemContext tddPlugin "Context" {
             include *
             autoLayout
         }
 
-        container system "Containers" {
+        container tddPlugin "Containers" {
             include *
             autoLayout
         }
@@ -37,6 +49,10 @@ workspace "opencode-tdd SDK E2E" "SDK-driven e2e tests for TDD plugin" {
             }
             element "Container" {
                 background #438dd5
+                color #ffffff
+            }
+            element "External" {
+                background #999999
                 color #ffffff
             }
         }

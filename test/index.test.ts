@@ -27,14 +27,6 @@ describe('Verifier', () => {
       response: '```json\n{"decision": "allow"}\n```',
     },
     {
-      name: 'given editType test, allows edit regardless of decision',
-      response: JSON.stringify({
-        editType: 'test',
-        decision: 'block',
-        reason: 'ignored',
-      }),
-    },
-    {
       name: 'given editType impl and decision allow, allows edit',
       response: JSON.stringify({ editType: 'impl', decision: 'allow' }),
     },
@@ -108,7 +100,16 @@ describe('Edge Cases', () => {
     )
     const atBoundary = new Date(Date.now() - (maxAge - 0.5) * 1000)
     await utimes(testOutputPath, atBoundary, atBoundary)
-    const hook = await getHook(projectRoot)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      }),
+    )
 
     await expect(
       callHook(hook, 'edit', 'src/example.ts'),
@@ -142,7 +143,16 @@ describe('Edge Cases', () => {
     const projectRoot = await createProjectRoot()
     await writeTestOutput(projectRoot, 'FAIL test output')
     await writeConfig(projectRoot, baseConfig)
-    const hook = await getHook(projectRoot)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      }),
+    )
 
     // Paths with spaces and parentheses
     return expect(
@@ -211,17 +221,6 @@ describe('LLM-Based Edit Classification', () => {
     expect(llmCalled).toBe(true)
   })
 
-  test('given 0 failing tests and LLM classifies as test edit, allows without checking decision', async () => {
-    const { hook } = await setupGreenPhase({
-      editType: 'test',
-      decision: 'block',
-      reason: 'ignored',
-    })
-
-    // Even a .ts impl file should be allowed if LLM says it's a test edit
-    return expect(callHook(hook, 'edit', 'src/lib.rs')).resolves.toBeUndefined()
-  })
-
   test('given 0 failing tests and LLM classifies as impl edit with block, blocks', async () => {
     const { hook } = await setupGreenPhase({
       editType: 'impl',
@@ -249,7 +248,13 @@ describe('LLM-Based Edit Classification', () => {
 
 describe('OneFailingTestRule', () => {
   test('given 2+ failing tests, blocks edit with message', async () => {
-    const { hook } = await setupRedPhase('FAIL test one\nFAIL test two')
+    const { hook } = await setupRedPhase('FAIL test one\nFAIL test two', {
+      editType: 'impl',
+      acceptanceFailingTests: 0,
+      innerFailingTests: 2,
+      decision: 'block',
+      reason: 'Fix existing failing test first',
+    })
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD: Fix existing failing test first',
@@ -257,7 +262,13 @@ describe('OneFailingTestRule', () => {
   })
 
   test('given 1 failing test, allows edit on impl file', async () => {
-    const { hook } = await setupRedPhase('FAIL test one\nPASS test two')
+    const { hook } = await setupRedPhase('FAIL test one\nPASS test two', {
+      editType: 'impl',
+      acceptanceFailingTests: 0,
+      innerFailingTests: 1,
+      decision: 'allow',
+      reason: 'Implementing for red test',
+    })
 
     return expect(
       callHook(hook, 'edit', 'src/example.ts'),
@@ -265,19 +276,13 @@ describe('OneFailingTestRule', () => {
   })
 
   test('given 1 failing test, allows edit on test file', async () => {
-    const { hook } = await setupRedPhase('FAIL test one\nPASS test two')
-
-    return expect(
-      callHook(hook, 'edit', 'test/example.test.ts'),
-    ).resolves.toBeUndefined()
-  })
-
-  test('given 0 failing tests and test file, calls LLM for classification', async () => {
-    // LLM classifies as test edit - allows regardless of decision
-    const { hook } = await setupGreenPhase({
+    const { hook } = await setupRedPhase('FAIL test one\nPASS test two', {
       editType: 'test',
-      decision: 'block',
-      reason: 'ignored',
+      testScope: 'unit',
+      acceptanceFailingTests: 0,
+      innerFailingTests: 1,
+      decision: 'allow',
+      reason: 'Modifying test',
     })
 
     return expect(
@@ -340,7 +345,16 @@ describe('EnforcePatterns', () => {
     })
     await writeTestOutput(projectRoot, 'FAIL test output')
 
-    const hook = await getHook(projectRoot)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      }),
+    )
 
     return expect(
       callHook(hook, 'edit', 'src/example.ts'),
@@ -453,7 +467,13 @@ describe('TDDPlugin', () => {
   })
 
   test('allows edit when tests are failing', async () => {
-    const { hook } = await setupRedPhase()
+    const { hook } = await setupRedPhase('FAIL test output', {
+      editType: 'impl',
+      acceptanceFailingTests: 0,
+      innerFailingTests: 1,
+      decision: 'allow',
+      reason: 'Implementing for red test',
+    })
 
     return expect(
       callHook(hook, 'edit', 'src/example.ts'),
@@ -584,11 +604,17 @@ const mockLlmResponse = (response: object) => ({
   chat: async () => JSON.stringify(response),
 })
 
-const setupRedPhase = async (testOutput = 'FAIL test output') => {
+const setupRedPhase = async (
+  testOutput = 'FAIL test output',
+  llmResponse?: object,
+) => {
   const projectRoot = await createProjectRoot()
   await writeConfig(projectRoot, baseConfig)
   await writeTestOutput(projectRoot, testOutput)
-  const hook = await getHook(projectRoot)
+  const hook = await getHook(
+    projectRoot,
+    llmResponse ? mockLlmResponse(llmResponse) : undefined,
+  )
   return { projectRoot, hook }
 }
 
@@ -612,7 +638,10 @@ const setupStaleTestOutput = async (ageSeconds: number, maxAge?: number) => {
     projectRoot,
     maxAge ? { ...baseConfig, maxTestOutputAge: maxAge } : baseConfig,
   )
-  const hook = await getHook(projectRoot)
+  const hook = await getHook(
+    projectRoot,
+    mockLlmResponse({ editType: 'test', decision: 'allow' }),
+  )
   return { projectRoot, hook }
 }
 
@@ -780,6 +809,183 @@ describe('Non-Blocking Error Handling', () => {
   })
 })
 
+describe('Outside-In TDD Enforcement', () => {
+  describe('Acceptance Test Rules', () => {
+    test('given 0 red acceptance tests, when adding acceptance test, then allows', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'acceptance',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 0,
+        decision: 'allow',
+        reason: 'Starting outer acceptance test',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/acceptance/checkout.test.ts'),
+      ).resolves.toBeUndefined()
+    })
+
+    test('given 1 red acceptance test, when adding another acceptance test, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'acceptance',
+        acceptanceFailingTests: 1,
+        innerFailingTests: 0,
+        decision: 'block',
+        reason: 'Finish current feature first',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/acceptance/new-feature.test.ts'),
+      ).rejects.toThrow('TDD: Finish current feature first')
+    })
+
+    test('given 1 red acceptance test, when modifying that test, then allows', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'acceptance',
+        acceptanceFailingTests: 1,
+        innerFailingTests: 0,
+        decision: 'allow',
+        reason: 'Refining acceptance test',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/acceptance/checkout.test.ts'),
+      ).resolves.toBeUndefined()
+    })
+  })
+
+  describe('Inner Test Rules', () => {
+    test('given 0 red inner tests, when adding inner test, then allows', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'unit',
+        acceptanceFailingTests: 1,
+        innerFailingTests: 0,
+        decision: 'allow',
+        reason: 'Starting inner test',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/unit/validator.test.ts'),
+      ).resolves.toBeUndefined()
+    })
+
+    test('given 1 red inner test, when adding another inner test, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'unit',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'block',
+        reason: 'Fix failing test first',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/unit/parser.test.ts'),
+      ).rejects.toThrow('TDD: Fix failing test first')
+    })
+  })
+
+  describe('Implementation Rules', () => {
+    test('given 0 red inner tests and 0 red acceptance, when adding impl, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'impl',
+        testScope: undefined,
+        acceptanceFailingTests: 0,
+        innerFailingTests: 0,
+        decision: 'block',
+        reason: 'Write a failing test first',
+      })
+
+      return expect(callHook(hook, 'edit', 'src/validator.ts')).rejects.toThrow(
+        'TDD: Write a failing test first',
+      )
+    })
+
+    test('given 1 red inner test, when adding impl, then allows', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'impl',
+        testScope: undefined,
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'src/validator.ts'),
+      ).resolves.toBeUndefined()
+    })
+
+    test('given 1 red acceptance and 0 red inner, when adding impl, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'impl',
+        testScope: undefined,
+        acceptanceFailingTests: 1,
+        innerFailingTests: 0,
+        decision: 'block',
+        reason: 'Write a failing test first',
+      })
+
+      return expect(callHook(hook, 'edit', 'src/checkout.ts')).rejects.toThrow(
+        'TDD: Write a failing test first',
+      )
+    })
+  })
+
+  describe('Refactoring Rules', () => {
+    test('given all inner tests green, when refactoring, then allows', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'refactor',
+        testScope: undefined,
+        acceptanceFailingTests: 1,
+        innerFailingTests: 0,
+        decision: 'allow',
+        reason: 'Safe refactoring',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'src/validator.ts'),
+      ).resolves.toBeUndefined()
+    })
+  })
+
+  describe('Multiple Failing Tests Detection', () => {
+    test('given 2+ acceptance tests failing, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'acceptance',
+        acceptanceFailingTests: 2,
+        innerFailingTests: 0,
+        decision: 'block',
+        reason: 'Fix failing tests first',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/acceptance/checkout.test.ts'),
+      ).rejects.toThrow('TDD: Fix failing tests first')
+    })
+
+    test('given 2+ inner tests failing, then blocks', async () => {
+      const { hook } = await setupGreenPhase({
+        editType: 'test',
+        testScope: 'unit',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 2,
+        decision: 'block',
+        reason: 'Fix failing tests first',
+      })
+
+      return expect(
+        callHook(hook, 'edit', 'test/unit/validator.test.ts'),
+      ).rejects.toThrow('TDD: Fix failing tests first')
+    })
+  })
+})
+
 describe('Verification Audit', () => {
   test('given GREEN phase verification, when LLM is called, then audit entry is written', async () => {
     const projectRoot = await createProjectRoot()
@@ -806,17 +1012,28 @@ describe('Verification Audit', () => {
     expect(entry.response).toBeDefined()
   })
 
-  test('given RED phase (1 failing test), when edit is allowed, then no audit entry is written', async () => {
+  test('given RED phase (1 failing test), when edit is allowed, then audit entry is written', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
     await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
 
-    const hook = await getHook(projectRoot)
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        acceptanceFailingTests: 0,
+        innerFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      }),
+    )
 
     await callHook(hook, 'edit', 'src/example.ts')
 
     const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
-    await expect(() => readFile(auditPath, 'utf8')).toThrow()
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+    expect(entry.decision).toBe('allow')
   })
 
   test('given audit entry, when I read the file, then I see all required fields', async () => {
