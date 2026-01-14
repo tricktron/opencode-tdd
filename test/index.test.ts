@@ -105,7 +105,7 @@ describe('Edge Cases', () => {
       mockLlmResponse({
         editType: 'impl',
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
       }),
@@ -148,7 +148,7 @@ describe('Edge Cases', () => {
       mockLlmResponse({
         editType: 'impl',
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
       }),
@@ -251,7 +251,7 @@ describe('OneFailingTestRule', () => {
     const { hook } = await setupRedPhase('FAIL test one\nFAIL test two', {
       editType: 'impl',
       acceptanceFailingTests: 0,
-      innerFailingTests: 2,
+      unitFailingTests: 2,
       decision: 'block',
       reason: 'Fix existing failing test first',
     })
@@ -265,7 +265,7 @@ describe('OneFailingTestRule', () => {
     const { hook } = await setupRedPhase('FAIL test one\nPASS test two', {
       editType: 'impl',
       acceptanceFailingTests: 0,
-      innerFailingTests: 1,
+      unitFailingTests: 1,
       decision: 'allow',
       reason: 'Implementing for red test',
     })
@@ -280,7 +280,7 @@ describe('OneFailingTestRule', () => {
       editType: 'test',
       testScope: 'unit',
       acceptanceFailingTests: 0,
-      innerFailingTests: 1,
+      unitFailingTests: 1,
       decision: 'allow',
       reason: 'Modifying test',
     })
@@ -350,7 +350,7 @@ describe('EnforcePatterns', () => {
       mockLlmResponse({
         editType: 'impl',
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
       }),
@@ -470,7 +470,7 @@ describe('TDDPlugin', () => {
     const { hook } = await setupRedPhase('FAIL test output', {
       editType: 'impl',
       acceptanceFailingTests: 0,
-      innerFailingTests: 1,
+      unitFailingTests: 1,
       decision: 'allow',
       reason: 'Implementing for red test',
     })
@@ -816,7 +816,7 @@ describe('Outside-In TDD Enforcement', () => {
         editType: 'test',
         testScope: 'acceptance',
         acceptanceFailingTests: 0,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'allow',
         reason: 'Starting outer acceptance test',
       })
@@ -831,7 +831,7 @@ describe('Outside-In TDD Enforcement', () => {
         editType: 'test',
         testScope: 'acceptance',
         acceptanceFailingTests: 1,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'block',
         reason: 'Finish current feature first',
       })
@@ -846,7 +846,7 @@ describe('Outside-In TDD Enforcement', () => {
         editType: 'test',
         testScope: 'acceptance',
         acceptanceFailingTests: 1,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'allow',
         reason: 'Refining acceptance test',
       })
@@ -857,15 +857,15 @@ describe('Outside-In TDD Enforcement', () => {
     })
   })
 
-  describe('Inner Test Rules', () => {
-    test('given 0 red inner tests, when adding inner test, then allows', async () => {
+  describe('Unit Test Rules', () => {
+    test('given 0 red unit tests, when adding unit test, then allows', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'test',
         testScope: 'unit',
         acceptanceFailingTests: 1,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'allow',
-        reason: 'Starting inner test',
+        reason: 'Starting unit test',
       })
 
       return expect(
@@ -873,12 +873,12 @@ describe('Outside-In TDD Enforcement', () => {
       ).resolves.toBeUndefined()
     })
 
-    test('given 1 red inner test, when adding another inner test, then blocks', async () => {
+    test('given 1 red unit test, when adding another unit test, then blocks', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'test',
         testScope: 'unit',
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'block',
         reason: 'Fix failing test first',
       })
@@ -890,12 +890,12 @@ describe('Outside-In TDD Enforcement', () => {
   })
 
   describe('Implementation Rules', () => {
-    test('given 0 red inner tests and 0 red acceptance, when adding impl, then blocks', async () => {
+    test('given 0 red unit tests and 0 red acceptance, when adding impl, then blocks', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'impl',
         testScope: undefined,
         acceptanceFailingTests: 0,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'block',
         reason: 'Write a failing test first',
       })
@@ -905,12 +905,12 @@ describe('Outside-In TDD Enforcement', () => {
       )
     })
 
-    test('given 1 red inner test, when adding impl, then allows', async () => {
+    test('given 1 red unit test, when adding impl, then allows', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'impl',
         testScope: undefined,
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
       })
@@ -920,12 +920,12 @@ describe('Outside-In TDD Enforcement', () => {
       ).resolves.toBeUndefined()
     })
 
-    test('given 1 red acceptance and 0 red inner, when adding impl, then blocks', async () => {
+    test('given 1 red acceptance and 0 red unit, when adding impl, then blocks', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'impl',
         testScope: undefined,
         acceptanceFailingTests: 1,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'block',
         reason: 'Write a failing test first',
       })
@@ -937,12 +937,12 @@ describe('Outside-In TDD Enforcement', () => {
   })
 
   describe('Refactoring Rules', () => {
-    test('given all inner tests green, when refactoring, then allows', async () => {
+    test('given all unit tests green, when refactoring, then allows', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'refactor',
         testScope: undefined,
         acceptanceFailingTests: 1,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'allow',
         reason: 'Safe refactoring',
       })
@@ -959,7 +959,7 @@ describe('Outside-In TDD Enforcement', () => {
         editType: 'test',
         testScope: 'acceptance',
         acceptanceFailingTests: 2,
-        innerFailingTests: 0,
+        unitFailingTests: 0,
         decision: 'block',
         reason: 'Fix failing tests first',
       })
@@ -969,12 +969,12 @@ describe('Outside-In TDD Enforcement', () => {
       ).rejects.toThrow('TDD: Fix failing tests first')
     })
 
-    test('given 2+ inner tests failing, then blocks', async () => {
+    test('given 2+ unit tests failing, then blocks', async () => {
       const { hook } = await setupGreenPhase({
         editType: 'test',
         testScope: 'unit',
         acceptanceFailingTests: 0,
-        innerFailingTests: 2,
+        unitFailingTests: 2,
         decision: 'block',
         reason: 'Fix failing tests first',
       })
@@ -983,6 +983,31 @@ describe('Outside-In TDD Enforcement', () => {
         callHook(hook, 'edit', 'test/unit/validator.test.ts'),
       ).rejects.toThrow('TDD: Fix failing tests first')
     })
+  })
+})
+
+describe('Test Hierarchy Simplification', () => {
+  test('given verifier response with unitFailingTests, when all tests run, then all tests pass', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+    await writeTestOutput(projectRoot, 'FAIL test output')
+
+    // New schema: unitFailingTests instead of innerFailingTests
+    const hook = await getHook(
+      projectRoot,
+      mockLlmResponse({
+        editType: 'impl',
+        testScope: 'unit',
+        acceptanceFailingTests: 0,
+        unitFailingTests: 1,
+        decision: 'allow',
+        reason: 'Implementing for red test',
+      }),
+    )
+
+    await expect(
+      callHook(hook, 'edit', 'src/example.ts'),
+    ).resolves.toBeUndefined()
   })
 })
 
@@ -1022,7 +1047,7 @@ describe('Verification Audit', () => {
       mockLlmResponse({
         editType: 'impl',
         acceptanceFailingTests: 0,
-        innerFailingTests: 1,
+        unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
       }),
