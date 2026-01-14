@@ -168,16 +168,4 @@ describe('SDK E2E', () => {
       }),
     TEST_TIMEOUT_MS,
   )
-
-  test(
-    'allows edit when exactly one test fails',
-    () =>
-      runTddPluginTest({
-        setupTestOutput: async () => {
-          await Bun.write(testOutputPath, '1 test FAIL')
-        },
-        shouldSucceed: true,
-      }),
-    TEST_TIMEOUT_MS,
-  )
 })

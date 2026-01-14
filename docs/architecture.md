@@ -53,7 +53,7 @@ This approach:
 - Reuses the same model/provider configuration
 - Properly integrates with OpenCode's session management
 
-For unit tests, inject a mock client with a `chat` method - the plugin detects this and uses it directly instead of the SDK adapter.
+For unit tests, inject a mock client with a `chat` method via the same `client` parameter. The `resolveLlmClient` function duck-types to detect mock vs real SDK client at runtime. This is a pragmatic solution given the Plugin interface from `@opencode-ai/plugin` doesn't allow custom parameters for dependency injection.
 
 ## Observability
 
@@ -76,6 +76,41 @@ These measures prevent:
 - State leakage via log files
 - Source file mutations persisting between tests
 - Process state corruption
+
+## Outside-In TDD Enforcement
+
+The plugin supports outside-in TDD (GOOS style) where one "guiding" acceptance test may remain red while inner tests follow strict TDD.
+
+### Test Hierarchy
+
+| Level       | Scope                            | Rule                                    |
+| ----------- | -------------------------------- | --------------------------------------- |
+| Acceptance  | End-to-end, user-facing behavior | Max 1 red at a time, acts as north star |
+| Integration | Component interaction            | Strict TDD: 0 or 1 red                  |
+| Unit        | Single component isolation       | Strict TDD: 0 or 1 red                  |
+
+### Decision Logic (LLM-based)
+
+All edits go through the verifier LLM. No heuristic-based fast paths. The LLM:
+
+1. Parses test output to count failing tests by scope
+2. Classifies the edit (test/impl/refactor) and scope
+3. Applies rules:
+   - `acceptanceFailingTests > 1` → block
+   - `innerFailingTests > 1` → block
+   - Adding acceptance test while one is red → block
+   - Adding inner test while one is red → block
+   - Implementation with 0 inner failing tests → block (write test first)
+   - Implementation with 1 inner failing test → allow
+   - Modifying the red acceptance test → allow (refinement ok)
+   - Refactoring → allow
+
+### Why LLM-only
+
+- Acceptance vs inner test distinction requires understanding intent, not pattern matching
+- Test output formats vary across frameworks - LLM handles all
+- Single decision point, no brittle heuristics
+- Full test output already sent to verifier
 
 ## Out of Scope
 

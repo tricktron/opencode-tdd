@@ -18,26 +18,40 @@ export type VerifyEditOptions = {
   auditor?: Auditor
 }
 
-const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier.
+const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier supporting outside-in TDD.
 
-Analyze the file edit and determine:
-1. Is this edit adding/modifying TEST code or IMPLEMENTATION code?
-2. If implementation: does it follow TDD rules?
+Analyze the file edit and test output to determine:
+1. Parse test output to count failing tests by scope
+2. Classify edit type and scope
+3. Apply outside-in TDD rules
 
-TDD Rules for GREEN phase (all tests passing):
-- Adding new test code: ALLOWED (starting next RED phase)
-- Refactoring without new behavior: ALLOWED
-- Adding new implementation behavior: BLOCKED (Write a failing test first)
+Test Scopes:
+- Acceptance: end-to-end user behavior (broader scope)
+- Integration: component interaction
+- Unit: single component isolation
+- When ambiguous, treat as inner test (stricter rule)
+
+Outside-In TDD Rules:
+- acceptanceFailingTests > 1 → BLOCK
+- innerFailingTests > 1 → BLOCK
+- Adding acceptance test while one is red → BLOCK
+- Adding inner test while one is red → BLOCK
+- Implementation with 0 inner failing tests → BLOCK (write test first)
+- Implementation with 1 inner failing test → ALLOW
+- Modifying the red acceptance test → ALLOW (refinement ok)
+- Refactoring → ALLOW
 
 Respond with JSON only (no markdown, no code blocks):
 {
-  "editType": "test" | "impl",
+  "editType": "test" | "impl" | "refactor",
+  "testScope": "acceptance" | "integration" | "unit" | undefined,
+  "acceptanceFailingTests": number,
+  "innerFailingTests": number,
   "decision": "allow" | "block",
   "reason": "brief explanation"
 }
 
-If editType is "test", decision is ignored (tests always allowed in GREEN).
-For implementation edits in GREEN phase, use reason: "Write a failing test first".`
+testScope is required when editType is "test", undefined otherwise.`
 
 const extractJson = (response: string): string => {
   const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/)
@@ -45,7 +59,10 @@ const extractJson = (response: string): string => {
 }
 
 type ParsedResponse = {
-  editType?: 'test' | 'impl'
+  editType?: 'test' | 'impl' | 'refactor'
+  testScope?: 'acceptance' | 'integration' | 'unit'
+  acceptanceFailingTests?: number
+  innerFailingTests?: number
   decision?: string
   reason?: string
 }
@@ -74,10 +91,7 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
   }
 
   const parsed = parseResponse(response)
-  const decision =
-    parsed.editType === 'test' || parsed.decision === 'allow'
-      ? 'allow'
-      : 'block'
+  const decision = parsed.decision === 'allow' ? 'allow' : 'block'
   const reason =
     parsed.reason ?? (decision === 'block' ? 'Write a failing test first' : '')
 
@@ -100,11 +114,7 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
     }
   }
 
-  if (parsed.editType === 'test') {
-    return
-  }
-
-  if (parsed.decision !== 'allow') {
-    throw new Error(parsed.reason ?? 'Write a failing test first')
+  if (decision !== 'allow') {
+    throw new Error(reason)
   }
 }
