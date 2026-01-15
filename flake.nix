@@ -28,7 +28,6 @@
                     eslint
                     typescript
                     prettier
-                    opencode
                 ];
 
                 # Fix to avoid changing my git language to German

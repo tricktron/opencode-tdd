@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "codescene": {
+      "type": "local",
+      "command": ["podman", "run", "--rm", "-i", "-e", "CS_ACCESS_TOKEN", "-e", "CS_MOUNT_PATH=/Users/tricktron/github/my-repos/opencode-tdd", "--mount", "type=bind,src=/Users/tricktron/github/my-repos/opencode-tdd,dst=/mount/,ro", "codescene/codescene-mcp"],
+      "enabled": true,
+    },
+  },
+}

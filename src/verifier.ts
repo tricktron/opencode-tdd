@@ -46,18 +46,18 @@ or
 BLOCK: <brief reason>`
 
 type ParsedResponse = {
-  decision?: string
-  reason?: string
+  decision: 'allow' | 'block'
+  reason: string
 }
 
 const parseResponse = (response: string): ParsedResponse => {
   const trimmed = response.trim()
 
   if (trimmed === 'ALLOW') {
-    return { decision: 'allow' }
+    return { decision: 'allow', reason: '' }
   }
   if (trimmed.startsWith('BLOCK:')) {
-    const reason = trimmed.slice(6).trim() || undefined
+    const reason = trimmed.slice(6).trim() || 'Write a failing test first'
     return { decision: 'block', reason }
   }
 
@@ -109,10 +109,6 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
     throw error
   }
 
-  const decision = parsed.decision === 'allow' ? 'allow' : 'block'
-  const reason =
-    parsed.reason ?? (decision === 'block' ? 'Write a failing test first' : '')
-
   if (opts.auditor) {
     try {
       await opts.auditor.record({
@@ -120,8 +116,8 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
         filePath: opts.filePath,
         prompt,
         response,
-        decision,
-        reason,
+        decision: parsed.decision,
+        reason: parsed.reason,
       })
     } catch (error) {
       // Audit failure should not affect verification - log it
@@ -132,7 +128,7 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
     }
   }
 
-  if (decision !== 'allow') {
-    throw new Error(reason)
+  if (parsed.decision !== 'allow') {
+    throw new Error(parsed.reason)
   }
 }
