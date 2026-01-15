@@ -21,6 +21,56 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 describe('Verifier', () => {
+  // Slice: 11-simplify-to-text-response
+  // Given plain text ALLOW response, when parsed, then allows edit
+  test('given plain text ALLOW response, when parsed, then allows edit', async () => {
+    await verifyEdit(verifyOpts(mockClient('ALLOW')))
+    // No throw = success
+  })
+
+  test('given plain text BLOCK response, when parsed, then throws with reason', async () => {
+    await expect(
+      verifyEdit(verifyOpts(mockClient('BLOCK: Write a failing test first'))),
+    ).rejects.toThrow('Write a failing test first')
+  })
+
+  test('given invalid plain text response, when parse fails, then error includes truncated response', async () => {
+    const longInvalidResponse = 'x'.repeat(150)
+
+    await expect(
+      verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
+    ).rejects.toThrow(
+      'Invalid verifier response (got: "' + 'x'.repeat(100) + '...")',
+    )
+  })
+
+  test('given plain text response with parse error, when auditor present, then records parse_error audit entry', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
+    const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
+
+    await expect(
+      verifyEdit({
+        ...verifyOpts(mockClient('invalid response')),
+        auditor,
+      }),
+    ).rejects.toThrow('Invalid verifier response')
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry.decision).toBe('block')
+    expect(entry.timestamp).toMatch(
+      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
+    )
+    expect(entry.filePath).toBe('file.ts')
+    expect(entry.prompt).toContain('file.ts')
+    expect(entry.response).toBe('invalid response')
+    expect(entry.reason).toBe(
+      'Invalid verifier response (got: "invalid response")',
+    )
+  })
+
   // Slice: 10-truncated-response-in-errors
   // Given invalid verifier response, when parse fails, then error includes truncated response
   test('given invalid JSON response, when parse fails, then error includes first 100 chars', async () => {
@@ -41,7 +91,7 @@ describe('Verifier', () => {
 
   // Slice: 09-audit-failed-responses
   // Given verifier receives invalid JSON, when parseResponse fails, then audit entry is written before throwing
-  test('given invalid JSON response, when parse fails, then audit entry is written with parse_error status', async () => {
+  test('given invalid JSON response, when parse fails, then audit entry is written', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
     const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
 
@@ -56,35 +106,17 @@ describe('Verifier', () => {
     const auditContent = await readFile(auditPath, 'utf8')
     const entry = JSON.parse(auditContent.trim())
 
-    expect(entry.status).toBe('parse_error')
+    expect(entry.decision).toBe('block')
     expect(entry.timestamp).toMatch(
       /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
     )
     expect(entry.filePath).toBe('file.ts')
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('not valid json')
-    expect(entry.errorType).toBe(
+    expect(entry.reason).toBe(
       'Invalid verifier response (got: "not valid json")',
     )
   })
-
-  const allowTests = [
-    {
-      name: 'given JSON wrapped in markdown code block, extracts and parses correctly',
-      response: '```json\n{"decision": "allow"}\n```',
-    },
-    {
-      name: 'given editType impl and decision allow, allows edit',
-      response: JSON.stringify({ editType: 'impl', decision: 'allow' }),
-    },
-  ]
-
-  for (const tc of allowTests) {
-    test(tc.name, async () => {
-      await verifyEdit(verifyOpts(mockClient(tc.response)))
-      // No throw = success
-    })
-  }
 
   const blockTests = [
     {
@@ -95,32 +127,18 @@ describe('Verifier', () => {
       expectedError: 'Verification failed: Network error',
     },
     {
-      name: 'given invalid JSON response, throws with Invalid verifier response',
-      response: 'not valid json',
-      expectedError: 'Invalid verifier response (got: "not valid json")',
+      name: 'given invalid plain text response, throws with Invalid verifier response',
+      response: 'not valid response',
+      expectedError: 'Invalid verifier response (got: "not valid response")',
     },
     {
-      name: 'given missing decision field, throws with reason',
-      response: JSON.stringify({ reason: 'some reason' }),
-      expectedError: 'some reason',
-    },
-    {
-      name: 'given invalid decision value like maybe, throws with reason',
-      response: JSON.stringify({ decision: 'maybe', reason: 'not sure' }),
-      expectedError: 'not sure',
-    },
-    {
-      name: 'given missing reason field when blocking, throws with default reason',
-      response: JSON.stringify({ decision: 'block' }),
+      name: 'given missing reason in BLOCK, throws with default reason',
+      response: 'BLOCK:',
       expectedError: 'Write a failing test first',
     },
     {
-      name: 'given editType impl and decision block, throws with reason',
-      response: JSON.stringify({
-        editType: 'impl',
-        decision: 'block',
-        reason: 'Write test first',
-      }),
+      name: 'given BLOCK with reason, throws with reason',
+      response: 'BLOCK: Write test first',
       expectedError: 'Write test first',
     },
   ]
@@ -218,7 +236,7 @@ describe('Edit Content Passed to LLM', () => {
     const client = {
       chat: async (_model: string, messages: Array<{ content: string }>) => {
         receivedContent = messages[1].content
-        return JSON.stringify({ editType: 'test', decision: 'allow' })
+        return 'ALLOW'
       },
     }
     const hook = await getHook(projectRoot, client)
@@ -256,7 +274,7 @@ describe('LLM-Based Edit Classification', () => {
     const mockClient = {
       chat: async () => {
         llmCalled = true
-        return JSON.stringify({ editType: 'test', decision: 'allow' })
+        return 'ALLOW'
       },
     }
 
@@ -647,13 +665,22 @@ const callHook = (
     { args: { filePath, ...args } } as Parameters<NonNullable<typeof hook>>[1],
   )
 
-const mockLlmResponse = (response: object) => ({
-  chat: async () => JSON.stringify(response),
+const mockLlmResponse = (response: {
+  decision: string
+  reason?: string
+  [key: string]: unknown
+}) => ({
+  chat: async () => {
+    if (response.decision === 'allow') {
+      return 'ALLOW'
+    }
+    return `BLOCK: ${response.reason ?? 'Write a failing test first'}`
+  },
 })
 
 const setupRedPhase = async (
   testOutput = 'FAIL test output',
-  llmResponse?: object,
+  llmResponse?: { decision: string; reason?: string; [key: string]: unknown },
 ) => {
   const projectRoot = await createProjectRoot()
   await writeConfig(projectRoot, baseConfig)
@@ -665,7 +692,11 @@ const setupRedPhase = async (
   return { projectRoot, hook }
 }
 
-const setupGreenPhase = async (llmResponse: object) => {
+const setupGreenPhase = async (llmResponse: {
+  decision: string
+  reason?: string
+  [key: string]: unknown
+}) => {
   const projectRoot = await createProjectRoot()
   await writeConfig(projectRoot, baseConfig)
   await writeTestOutput(projectRoot, 'PASS all tests')
@@ -780,9 +811,7 @@ describe('Auditor', () => {
     const auditor = createAuditor(projectRoot)
 
     await verifyEdit({
-      client: mockClient(
-        JSON.stringify({ editType: 'impl', decision: 'allow' }),
-      ),
+      client: mockClient('ALLOW'),
       model: 'test-model',
       filePath: 'src/example.ts',
       editContent: 'const x = 1',
@@ -797,7 +826,7 @@ describe('Auditor', () => {
     expect(entry.filePath).toBe('src/example.ts')
     expect(entry.decision).toBe('allow')
     expect(entry.prompt).toContain('src/example.ts')
-    expect(entry.response).toContain('impl')
+    expect(entry.response).toBe('ALLOW')
   })
 })
 
@@ -810,7 +839,7 @@ describe('Non-Blocking Error Handling', () => {
     }
 
     const mockClient = {
-      chat: async () => JSON.stringify({ editType: 'impl', decision: 'allow' }),
+      chat: async () => 'ALLOW',
     }
 
     // Should not throw despite audit failure
@@ -837,7 +866,7 @@ describe('Non-Blocking Error Handling', () => {
             parts: [
               {
                 type: 'text',
-                text: JSON.stringify({ editType: 'impl', decision: 'allow' }),
+                text: 'ALLOW',
               },
             ],
           },
@@ -1133,7 +1162,7 @@ describe('Verification Audit', () => {
     )
     expect(entry.filePath).toBe('src/example.ts')
     expect(entry.prompt).toContain('src/example.ts')
-    expect(entry.response).toContain('impl')
+    expect(entry.response).toContain('BLOCK')
     expect(entry.decision).toBe('block')
     expect(entry.reason).toBe('test reason')
   })
