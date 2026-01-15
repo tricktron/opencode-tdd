@@ -21,6 +21,33 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 describe('Verifier', () => {
+  // Slice: 09-audit-failed-responses
+  // Given verifier receives invalid JSON, when parseResponse fails, then audit entry is written before throwing
+  test('given invalid JSON response, when parse fails, then audit entry is written with parse_error status', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
+    const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
+
+    await expect(
+      verifyEdit({
+        ...verifyOpts(mockClient('not valid json')),
+        auditor,
+      }),
+    ).rejects.toThrow('Invalid verifier response')
+
+    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
+    const auditContent = await readFile(auditPath, 'utf8')
+    const entry = JSON.parse(auditContent.trim())
+
+    expect(entry.status).toBe('parse_error')
+    expect(entry.timestamp).toMatch(
+      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
+    )
+    expect(entry.filePath).toBe('file.ts')
+    expect(entry.prompt).toContain('file.ts')
+    expect(entry.response).toBe('not valid json')
+    expect(entry.errorType).toBe('Invalid verifier response')
+  })
+
   const allowTests = [
     {
       name: 'given JSON wrapped in markdown code block, extracts and parses correctly',
