@@ -21,6 +21,24 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 describe('Verifier', () => {
+  // Slice: 10-truncated-response-in-errors
+  // Given invalid verifier response, when parse fails, then error includes truncated response
+  test('given invalid JSON response, when parse fails, then error includes first 100 chars', async () => {
+    const longInvalidResponse = 'x'.repeat(150)
+
+    await expect(
+      verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
+    ).rejects.toThrow(
+      'Invalid verifier response (got: "' + 'x'.repeat(100) + '...")',
+    )
+  })
+
+  test('given short invalid response, when parse fails, then error includes full response without ellipsis', async () => {
+    await expect(
+      verifyEdit(verifyOpts(mockClient('not valid json'))),
+    ).rejects.toThrow('Invalid verifier response (got: "not valid json")')
+  })
+
   // Slice: 09-audit-failed-responses
   // Given verifier receives invalid JSON, when parseResponse fails, then audit entry is written before throwing
   test('given invalid JSON response, when parse fails, then audit entry is written with parse_error status', async () => {
@@ -45,7 +63,9 @@ describe('Verifier', () => {
     expect(entry.filePath).toBe('file.ts')
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('not valid json')
-    expect(entry.errorType).toBe('Invalid verifier response')
+    expect(entry.errorType).toBe(
+      'Invalid verifier response (got: "not valid json")',
+    )
   })
 
   const allowTests = [
@@ -77,7 +97,7 @@ describe('Verifier', () => {
     {
       name: 'given invalid JSON response, throws with Invalid verifier response',
       response: 'not valid json',
-      expectedError: 'Invalid verifier response',
+      expectedError: 'Invalid verifier response (got: "not valid json")',
     },
     {
       name: 'given missing decision field, throws with reason',

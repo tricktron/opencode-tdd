@@ -71,7 +71,9 @@ const parseResponse = (response: string): ParsedResponse => {
     const json = extractJson(response)
     return JSON.parse(json) as ParsedResponse
   } catch {
-    throw new Error('Invalid verifier response')
+    const truncated = response.slice(0, 100)
+    const suffix = response.length > 100 ? '...' : ''
+    throw new Error(`Invalid verifier response (got: "${truncated}${suffix}")`)
   }
 }
 
