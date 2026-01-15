@@ -11,7 +11,7 @@ workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
 
         tddPlugin = softwareSystem "opencode-tdd Plugin" "Enforces outside-in TDD discipline" {
             hook = container "Edit Hook" "Intercepts edit/write tool calls" "TypeScript"
-            verifier = container "LLM Verifier" "Classifies edits and enforces TDD rules" "TypeScript"
+            verifier = container "LLM Verifier" "Enforces TDD rules via plain text ALLOW/BLOCK responses" "TypeScript"
             config = container "Config Loader" "Loads .opencode/tdd.json" "TypeScript"
             auditor = container "Auditor" "Records verification decisions (success & parse failures)" "JSONL"
         }
