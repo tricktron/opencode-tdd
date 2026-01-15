@@ -13,7 +13,7 @@ workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
             hook = container "Edit Hook" "Intercepts edit/write tool calls" "TypeScript"
             verifier = container "LLM Verifier" "Classifies edits and enforces TDD rules" "TypeScript"
             config = container "Config Loader" "Loads .opencode/tdd.json" "TypeScript"
-            auditor = container "Auditor" "Records verification decisions" "JSONL"
+            auditor = container "Auditor" "Records verification decisions (success & parse failures)" "JSONL"
         }
 
         testRunner = softwareSystem "Test Runner" "External test framework (vitest, jest, etc.)" "External"
@@ -24,7 +24,7 @@ workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
         tddPlugin.hook -> tddPlugin.config "Loads patterns and settings"
         tddPlugin.hook -> tddPlugin.verifier "Delegates classification"
         tddPlugin.verifier -> opencode.server "Creates child session for LLM call"
-        tddPlugin.verifier -> tddPlugin.auditor "Records decision"
+        tddPlugin.verifier -> tddPlugin.auditor "Records decision & parse errors"
         tddPlugin.hook -> testRunner "Reads test output file"
     }
 
