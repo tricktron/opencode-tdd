@@ -20,9 +20,9 @@ export type VerifyEditOptions = {
 
 const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier supporting outside-in TDD.
 
-Analyze the file edit and test output to determine:
-1. Parse test output to count failing tests by scope
-2. Classify edit type and scope
+First, analyze the edit:
+1. Count failing tests by scope (acceptance vs unit)
+2. Classify edit type (test, implementation, or refactor)
 3. Apply outside-in TDD rules
 
 Test Scopes:
@@ -40,41 +40,30 @@ Outside-In TDD Rules:
 - Modifying the red acceptance test → ALLOW (refinement ok)
 - Refactoring → ALLOW
 
-Respond with JSON only (no markdown, no code blocks):
-{
-  "editType": "test" | "impl" | "refactor",
-  "testScope": "acceptance" | "unit" | undefined,
-  "acceptanceFailingTests": number,
-  "unitFailingTests": number,
-  "decision": "allow" | "block",
-  "reason": "brief explanation"
-}
-
-testScope is required when editType is "test", undefined otherwise.`
-
-const extractJson = (response: string): string => {
-  const codeBlockMatch = response.match(/```(?:json)?\s*([\s\S]*?)```/)
-  return codeBlockMatch ? codeBlockMatch[1].trim() : response
-}
+Then respond with your decision:
+ALLOW
+or
+BLOCK: <brief reason>`
 
 type ParsedResponse = {
-  editType?: 'test' | 'impl' | 'refactor'
-  testScope?: 'acceptance' | 'unit'
-  acceptanceFailingTests?: number
-  unitFailingTests?: number
   decision?: string
   reason?: string
 }
 
 const parseResponse = (response: string): ParsedResponse => {
-  try {
-    const json = extractJson(response)
-    return JSON.parse(json) as ParsedResponse
-  } catch {
-    const truncated = response.slice(0, 100)
-    const suffix = response.length > 100 ? '...' : ''
-    throw new Error(`Invalid verifier response (got: "${truncated}${suffix}")`)
+  const trimmed = response.trim()
+
+  if (trimmed === 'ALLOW') {
+    return { decision: 'allow' }
   }
+  if (trimmed.startsWith('BLOCK:')) {
+    const reason = trimmed.slice(6).trim() || undefined
+    return { decision: 'block', reason }
+  }
+
+  const truncated = response.slice(0, 100)
+  const suffix = response.length > 100 ? '...' : ''
+  throw new Error(`Invalid verifier response (got: "${truncated}${suffix}")`)
 }
 
 export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
@@ -108,8 +97,6 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
           response,
           decision: 'block',
           reason: errorMessage,
-          status: 'parse_error',
-          errorType: errorMessage,
         })
       } catch (auditError) {
         safeLog(opts.client.app, 'warn', 'Failed to write audit entry', {
@@ -135,7 +122,6 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
         response,
         decision,
         reason,
-        status: 'success',
       })
     } catch (error) {
       // Audit failure should not affect verification - log it
