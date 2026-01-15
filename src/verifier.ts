@@ -89,7 +89,37 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
     throw new Error(`Verification failed: ${message}`)
   }
 
-  const parsed = parseResponse(response)
+  let parsed: ParsedResponse
+  try {
+    parsed = parseResponse(response)
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown parse error'
+
+    // Audit parse failure before throwing
+    if (opts.auditor) {
+      try {
+        await opts.auditor.record({
+          timestamp: new Date().toISOString(),
+          filePath: opts.filePath,
+          prompt,
+          response,
+          decision: 'block',
+          reason: errorMessage,
+          status: 'parse_error',
+          errorType: errorMessage,
+        })
+      } catch (auditError) {
+        safeLog(opts.client.app, 'warn', 'Failed to write audit entry', {
+          filePath: opts.filePath,
+          error: formatError(auditError),
+        })
+      }
+    }
+
+    throw error
+  }
+
   const decision = parsed.decision === 'allow' ? 'allow' : 'block'
   const reason =
     parsed.reason ?? (decision === 'block' ? 'Write a failing test first' : '')
@@ -103,6 +133,7 @@ export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {
         response,
         decision,
         reason,
+        status: 'success',
       })
     } catch (error) {
       // Audit failure should not affect verification - log it
