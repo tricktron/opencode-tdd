@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
@@ -104,71 +104,14 @@ describe('Verifier', () => {
 })
 
 describe('Edge Cases', () => {
-  test('given test output age at boundary, treats maxAge as fresh and maxAge+1 as stale', async () => {
-    const maxAge = 10
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, { ...baseConfig, maxTestOutputAge: maxAge })
-
-    // At maxAge boundary (fresh) - slightly under to account for execution time
-    const testOutputPath = await writeTestOutput(
-      projectRoot,
-      'FAIL test output',
-    )
-    const atBoundary = new Date(Date.now() - (maxAge - 0.5) * 1000)
-    await utimes(testOutputPath, atBoundary, atBoundary)
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({
-        editType: 'impl',
-        acceptanceFailingTests: 0,
-        unitFailingTests: 1,
-        decision: 'allow',
-        reason: 'Implementing for red test',
-      }),
-    )
-
-    await expect(
-      callHook(hook, 'edit', 'src/example.ts'),
-    ).resolves.toBeUndefined()
-
-    // Just past maxAge (stale)
-    const pastBoundary = new Date(Date.now() - (maxAge + 1) * 1000)
-    await utimes(testOutputPath, pastBoundary, pastBoundary)
-
-    await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Test output is stale. Re-run tests before editing.',
-    )
-  })
-
-  test('given empty test output file, proceeds with empty string', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeTestOutput(projectRoot, '')
-    await writeConfig(projectRoot, baseConfig)
-    // Empty test output = 0 FAILs = GREEN phase, needs LLM verification
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({ editType: 'test', decision: 'allow' }),
-    )
-
-    return expect(
-      callHook(hook, 'edit', 'src/example.ts'),
-    ).resolves.toBeUndefined()
-  })
-
   test('given special characters in file path, handles correctly', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeTestOutput(projectRoot, 'FAIL test output')
-    await writeConfig(projectRoot, baseConfig)
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({
-        editType: 'impl',
-        acceptanceFailingTests: 0,
-        unitFailingTests: 1,
-        decision: 'allow',
-        reason: 'Implementing for red test',
-      }),
-    )
+    const { hook } = await setupRedPhase('FAIL test output', {
+      editType: 'impl',
+      acceptanceFailingTests: 0,
+      unitFailingTests: 1,
+      decision: 'allow',
+      reason: 'Implementing for red test',
+    })
 
     // Paths with spaces and parentheses
     return expect(
@@ -181,10 +124,41 @@ describe('Edit Content Passed to LLM', () => {
   const setupContentCapture = async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     let receivedContent: string | undefined
     const client = {
+      session: {
+        messages: async () => ({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'assistant' as const },
+              parts: [
+                {
+                  type: 'tool' as const,
+                  tool: 'bash',
+                  state: {
+                    status: 'completed' as const,
+                    output: 'PASS all tests',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        create: async () => ({ data: { id: 'test-session-id' } }),
+        prompt: async () => ({
+          data: {
+            parts: [
+              {
+                type: 'text' as const,
+                text: 'ALLOW',
+              },
+            ],
+          },
+        }),
+        delete: async () => ({}),
+      },
+      app: { log: async () => ({}) },
       chat: async (_model: string, messages: Array<{ content: string }>) => {
         receivedContent = messages[1].content
         return 'ALLOW'
@@ -219,15 +193,14 @@ describe('LLM-Based Edit Classification', () => {
   test('given test file and 0 failing tests, calls LLM for classification', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     let llmCalled = false
-    const mockClient = {
+    const mockClient = mockSdkClientWithSession('PASS all tests', {
       chat: async () => {
         llmCalled = true
         return 'ALLOW'
       },
-    }
+    })
 
     const hook = await getHook(projectRoot, mockClient)
 
@@ -323,12 +296,14 @@ describe('OneFailingTestRule', () => {
       ...baseConfig,
       enforcePatterns: ['src/**', 'spec/**'],
     })
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     // LLM classifies as test edit
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+      mockSdkClientWithSession(
+        'PASS test output',
+        mockLlmResponse({ editType: 'test', decision: 'allow' }),
+      ),
     )
 
     return expect(
@@ -344,7 +319,7 @@ describe('EnforcePatterns', () => {
       ...baseConfig,
       enforcePatterns: ['src/**'],
     })
-    // No test output file - would fail if TDD checks ran
+    // No session messages - would fail if TDD checks ran
 
     const hook = await getHook(projectRoot)
 
@@ -359,17 +334,19 @@ describe('EnforcePatterns', () => {
       ...baseConfig,
       enforcePatterns: ['src/**'],
     })
-    await writeTestOutput(projectRoot, 'FAIL test output')
 
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({
-        editType: 'impl',
-        acceptanceFailingTests: 0,
-        unitFailingTests: 1,
-        decision: 'allow',
-        reason: 'Implementing for red test',
-      }),
+      mockSdkClientWithSession(
+        'FAIL test output',
+        mockLlmResponse({
+          editType: 'impl',
+          acceptanceFailingTests: 0,
+          unitFailingTests: 1,
+          decision: 'allow',
+          reason: 'Implementing for red test',
+        }),
+      ),
     )
 
     return expect(
@@ -383,30 +360,18 @@ describe('EnforcePatterns', () => {
       ...baseConfig,
       enforcePatterns: ['src/**'],
     })
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({ decision: 'block', reason: 'Write a failing test' }),
+      mockSdkClientWithSession(
+        'PASS test output',
+        mockLlmResponse({ decision: 'block', reason: 'Write a failing test' }),
+      ),
     )
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD violation: Write a failing test',
     )
-  })
-
-  test('given missing enforcePatterns, allows edit without TDD checks', async () => {
-    const projectRoot = await createProjectRoot()
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { enforcePatterns: _, ...configWithoutEnforce } = baseConfig
-    await writeConfig(projectRoot, configWithoutEnforce)
-    // No test output - would fail if TDD checks ran
-
-    const hook = await getHook(projectRoot)
-
-    return expect(
-      callHook(hook, 'edit', 'src/example.ts'),
-    ).resolves.toBeUndefined()
   })
 
   test('given test file matching enforcePatterns and tests passing, calls LLM for classification', async () => {
@@ -415,12 +380,14 @@ describe('EnforcePatterns', () => {
       ...baseConfig,
       enforcePatterns: ['src/**', 'test/**'],
     })
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     // LLM classifies test file edit as test edit
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({ editType: 'test', decision: 'allow' }),
+      mockSdkClientWithSession(
+        'PASS test output',
+        mockLlmResponse({ editType: 'test', decision: 'allow' }),
+      ),
     )
 
     return expect(
@@ -496,46 +463,22 @@ describe('TDDPlugin', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('blocks when test output is missing', async () => {
+  test('blocks when session has no bash output', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
 
-    const hook = await getHook(projectRoot)
+    const mockClient = {
+      session: {
+        messages: async () => ({
+          data: [],
+        }),
+      },
+    }
+    const hook = await getHook(projectRoot, mockClient)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Run tests first before editing implementation.',
+      'No bash command output found in session',
     )
-  })
-
-  test('blocks when test output is stale', async () => {
-    const { hook } = await setupStaleTestOutput(2, 1)
-
-    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Test output is stale. Re-run tests before editing.',
-    )
-  })
-
-  test('uses default maxTestOutputAge when stale', async () => {
-    const { hook } = await setupStaleTestOutput(301)
-
-    return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Test output is stale. Re-run tests before editing.',
-    )
-  })
-
-  test('uses default maxTestOutputAge when fresh', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS sample test output')
-    // PASS output = GREEN phase, needs LLM verification
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({ editType: 'test', decision: 'allow' }),
-    )
-
-    return expect(
-      callHook(hook, 'edit', 'src/example.ts'),
-    ).resolves.toBeUndefined()
   })
 
   test('blocks when verifier returns block decision', async () => {
@@ -580,14 +523,6 @@ const writeConfigRaw = async (projectRoot: string, content: string) => {
   await writeFile(configPath, content)
 }
 
-const writeTestOutput = async (projectRoot: string, content: string) => {
-  const tddDir = join(projectRoot, '.opencode', 'tdd')
-  await mkdir(tddDir, { recursive: true })
-  const testOutputPath = join(tddDir, 'test-output.txt')
-  await writeFile(testOutputPath, content)
-  return testOutputPath
-}
-
 const getHook = async (projectRoot: string, client?: unknown) => {
   const hooks = await TDDPlugin({
     directory: projectRoot,
@@ -611,7 +546,11 @@ const callHook = (
   args?: Record<string, unknown>,
 ) =>
   hook!(
-    { tool } as Parameters<NonNullable<typeof hook>>[0],
+    {
+      tool,
+      sessionID: 'test-session-id',
+      callID: 'test-call-id',
+    } as Parameters<NonNullable<typeof hook>>[0],
     { args: { filePath, ...args } } as Parameters<NonNullable<typeof hook>>[1],
   )
 
@@ -701,25 +640,6 @@ const setupGreenPhase = async (llmResponse: {
   const hook = await getHook(
     projectRoot,
     mockSdkClientWithSession('PASS all tests', mockLlmResponse(llmResponse)),
-  )
-  return { projectRoot, hook }
-}
-
-const setupStaleTestOutput = async (ageSeconds: number, maxAge?: number) => {
-  const projectRoot = await createProjectRoot()
-  const testOutputPath = await writeTestOutput(
-    projectRoot,
-    'PASS sample test output',
-  )
-  const staleTime = new Date(Date.now() - ageSeconds * 1000)
-  await utimes(testOutputPath, staleTime, staleTime)
-  await writeConfig(
-    projectRoot,
-    maxAge ? { ...baseConfig, maxTestOutputAge: maxAge } : baseConfig,
-  )
-  const hook = await getHook(
-    projectRoot,
-    mockLlmResponse({ editType: 'test', decision: 'allow' }),
   )
   return { projectRoot, hook }
 }
@@ -857,10 +777,26 @@ describe('Non-Blocking Error Handling', () => {
   test('given session cleanup fails, verification still completes successfully', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     const mockSdkClient = {
       session: {
+        messages: async () => ({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'assistant' as const },
+              parts: [
+                {
+                  type: 'tool' as const,
+                  tool: 'bash',
+                  state: {
+                    status: 'completed' as const,
+                    output: 'PASS all tests',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
         create: async () => ({ data: { id: 'test-session-id' } }),
         prompt: async () => ({
           data: {
@@ -1065,22 +1001,14 @@ describe('Outside-In TDD Enforcement', () => {
 
 describe('Test Hierarchy Simplification', () => {
   test('given verifier response with unitFailingTests, when all tests run, then all tests pass', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test output')
-
-    // New schema: unitFailingTests instead of innerFailingTests
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({
-        editType: 'impl',
-        testScope: 'unit',
-        acceptanceFailingTests: 0,
-        unitFailingTests: 1,
-        decision: 'allow',
-        reason: 'Implementing for red test',
-      }),
-    )
+    const { hook } = await setupRedPhase('FAIL test output', {
+      editType: 'impl',
+      testScope: 'unit',
+      acceptanceFailingTests: 0,
+      unitFailingTests: 1,
+      decision: 'allow',
+      reason: 'Implementing for red test',
+    })
 
     await expect(
       callHook(hook, 'edit', 'src/example.ts'),
@@ -1092,11 +1020,13 @@ describe('Verification Audit', () => {
   test('given GREEN phase verification, when LLM is called, then audit entry is written', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+      mockSdkClientWithSession(
+        'PASS all tests',
+        mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+      ),
     )
 
     await callHook(hook, 'edit', 'src/example.ts')
@@ -1115,19 +1045,15 @@ describe('Verification Audit', () => {
   })
 
   test('given RED phase (1 failing test), when edit is allowed, then audit entry is written', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'FAIL test one\nPASS test two')
-
-    const hook = await getHook(
-      projectRoot,
-      mockLlmResponse({
+    const { projectRoot, hook } = await setupRedPhase(
+      'FAIL test one\nPASS test two',
+      {
         editType: 'impl',
         acceptanceFailingTests: 0,
         unitFailingTests: 1,
         decision: 'allow',
         reason: 'Implementing for red test',
-      }),
+      },
     )
 
     await callHook(hook, 'edit', 'src/example.ts')
@@ -1141,15 +1067,17 @@ describe('Verification Audit', () => {
   test('given audit entry, when I read the file, then I see all required fields', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({
-        editType: 'impl',
-        decision: 'block',
-        reason: 'test reason',
-      }),
+      mockSdkClientWithSession(
+        'PASS all tests',
+        mockLlmResponse({
+          editType: 'impl',
+          decision: 'block',
+          reason: 'test reason',
+        }),
+      ),
     )
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow()
@@ -1171,11 +1099,13 @@ describe('Verification Audit', () => {
   test('given multiple verifications, when I read the audit file, then entries are appended', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS all tests')
 
     const hook = await getHook(
       projectRoot,
-      mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+      mockSdkClientWithSession(
+        'PASS all tests',
+        mockLlmResponse({ editType: 'impl', decision: 'allow' }),
+      ),
     )
 
     await callHook(hook, 'edit', 'src/first.ts')
