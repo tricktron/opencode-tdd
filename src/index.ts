@@ -16,7 +16,8 @@ const getTestOutputFromSession = async (
       path: { id: sessionId },
     })
   } catch (error) {
-    throw new Error('Failed to read session history')
+    const details = error instanceof Error ? error.message : String(error)
+    throw new Error(`Failed to read session history: ${details}`)
   }
 
   if (messagesResponse.error || !messagesResponse.data) {
@@ -256,7 +257,13 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const testOutput = await getTestOutput(sdkClient, input.sessionID)
+      let testOutput: string
+      try {
+        testOutput = await getTestOutput(sdkClient, input.sessionID)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new Error(`TDD violation: ${message}`)
+      }
 
       const editContent = getEditContent(input.tool, output.args)
 
