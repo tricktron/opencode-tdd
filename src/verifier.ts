@@ -58,7 +58,7 @@ const parseResponse = (response: string): ParsedResponse => {
   if (blockMatch) {
     const reason =
       blockMatch[1].replace(/^\*+|\*+$/g, '').trim() ||
-      'Write a failing test first, then retry this edit.'
+      'Verification failed. Please retry this edit.'
     return { decision: 'block', reason }
   }
 
@@ -70,7 +70,7 @@ const parseResponse = (response: string): ParsedResponse => {
   // Parse error - default to actionable block reason instead of exposing internal failure
   return {
     decision: 'block',
-    reason: 'Write a failing test first, then retry this edit.',
+    reason: 'Verification failed. Please retry this edit.',
   }
 }
 
