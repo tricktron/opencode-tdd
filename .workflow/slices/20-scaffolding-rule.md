@@ -2,27 +2,33 @@
 
 ## User Story
 
-As an opencode-tdd plugin user, I want the verifier to allow minimal scaffolding when my acceptance test fails due to missing imports/modules, so that I can follow natural outside-in TDD without being forced to write unit tests prematurely.
+As an opencode-tdd plugin user, I want the verifier to allow scaffolding when my acceptance test is failing, so that I can follow natural outside-in TDD without being forced to write unit tests prematurely.
 
 ## Acceptance Criteria
 
-Given an acceptance test that fails with import/module error (e.g., "Cannot find module")
-When I create minimal scaffolding (empty export, function stub)
-Then the verifier allows the edit
+Given 1 red acceptance test and 0 red unit tests
+When I add implementation code
+Then the verifier allows the edit (scaffolding phase)
 
-Given an acceptance test that fails with an assertion error
+Given 0 red acceptance tests and 0 red unit tests
 When I try to add implementation code
 Then the verifier blocks with "write unit test first"
 
-## Technical Notes
+## Implementation
 
-- Update `SYSTEM_PROMPT` in `src/verifier.ts`
-- Add new rule after line 45 distinguishing scaffolding vs implementation
-- Test output already available to LLM for analysis
-- Add unit tests for both scenarios
+Updated `SYSTEM_PROMPT` in `src/verifier.ts` with rule:
+
+```
+- Implementation with 0 unit failing tests:
+  - If acceptance test failing → ALLOW (scaffolding phase)
+  - Otherwise → BLOCK (write unit test first)
+```
+
+The scaffolding phase is naturally limited by existing constraint: `acceptanceFailingTests > 1 → BLOCK` (only one red acceptance test allowed).
 
 ## Out of Scope
 
 - Changing plugin architecture
 - Adding explicit scaffolding detection code
 - Modifying how test output is extracted
+- Mock-based unit tests (deleted as they provide no real validation)
