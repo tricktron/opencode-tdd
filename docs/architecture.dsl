@@ -14,18 +14,21 @@ workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
             verifier = container "LLM Verifier" "Enforces TDD rules via plain text ALLOW/BLOCK responses" "TypeScript"
             config = container "Config Loader" "Loads .opencode/tdd.json" "TypeScript"
             auditor = container "Auditor" "Records verification decisions (success & parse failures)" "JSONL"
+            sessionReader = container "Session Reader" "Extracts bash outputs from session history" "TypeScript"
         }
 
         testRunner = softwareSystem "Test Runner" "External test framework (vitest, jest, etc.)" "External"
 
         # Relationships
         agent -> opencode.server "Sends prompts"
+        agent -> testRunner "Runs tests via bash tool"
         opencode.server -> tddPlugin.hook "Triggers before edit/write"
         tddPlugin.hook -> tddPlugin.config "Loads patterns and settings"
+        tddPlugin.hook -> tddPlugin.sessionReader "Queries for bash outputs"
+        tddPlugin.sessionReader -> opencode.server "Reads session message history"
         tddPlugin.hook -> tddPlugin.verifier "Delegates classification"
         tddPlugin.verifier -> opencode.server "Creates child session for LLM call"
         tddPlugin.verifier -> tddPlugin.auditor "Records decision & parse errors"
-        tddPlugin.hook -> testRunner "Reads test output file"
     }
 
     views {
