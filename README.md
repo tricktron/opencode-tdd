@@ -37,6 +37,15 @@ Create `.opencode/tdd.json`:
 | `verifierModel`    | LLM model for edit classification       | required   |
 | `maxTestOutputAge` | Max seconds before test output is stale | `300`      |
 
+## Driving LLM System Prompt
+
+Add this to your driving LLM's system prompt for best results:
+
+> Your edits to source files are verified by a TDD guardian. If you violate
+> TDD principles (e.g., writing implementation without a failing test), your
+> edit will be blocked with a "TDD violation" error. When this happens, follow
+> the error's instructions before retrying.
+
 ## How It Works
 
 The plugin reads your test output file and enforces this state machine:
