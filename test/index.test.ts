@@ -560,7 +560,6 @@ describe('TDDPlugin', () => {
 })
 
 const baseConfig = {
-  testOutputFile: '.opencode/tdd/test-output.txt',
   enforcePatterns: ['src/**', 'test/**'],
   verifierModel: 'test-model',
 }
@@ -629,16 +628,65 @@ const mockLlmResponse = (response: {
   },
 })
 
+const mockSdkClientWithSession = (
+  testOutput: string,
+  llmClient?: ReturnType<typeof mockLlmResponse>,
+) => {
+  const combined = {
+    session: {
+      messages: async () => ({
+        data: [
+          {
+            info: { id: 'msg-1', role: 'assistant' },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'bash',
+                state: {
+                  status: 'completed',
+                  output: testOutput,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      create: async () => ({ data: { id: 'test-session-id' } }),
+      prompt: async () => ({
+        data: {
+          parts: [
+            {
+              type: 'text',
+              text: llmClient ? await llmClient.chat() : 'ALLOW',
+            },
+          ],
+        },
+      }),
+      delete: async () => ({}),
+    },
+    app: { log: async () => ({}) },
+  }
+
+  // If llmClient is provided, also include it directly for duck-typing
+  if (llmClient) {
+    return Object.assign(combined, llmClient)
+  }
+
+  return combined
+}
+
 const setupRedPhase = async (
   testOutput = 'FAIL test output',
   llmResponse?: { decision: string; reason?: string; [key: string]: unknown },
 ) => {
   const projectRoot = await createProjectRoot()
   await writeConfig(projectRoot, baseConfig)
-  await writeTestOutput(projectRoot, testOutput)
   const hook = await getHook(
     projectRoot,
-    llmResponse ? mockLlmResponse(llmResponse) : undefined,
+    mockSdkClientWithSession(
+      testOutput,
+      llmResponse ? mockLlmResponse(llmResponse) : undefined,
+    ),
   )
   return { projectRoot, hook }
 }
@@ -650,8 +698,10 @@ const setupGreenPhase = async (llmResponse: {
 }) => {
   const projectRoot = await createProjectRoot()
   await writeConfig(projectRoot, baseConfig)
-  await writeTestOutput(projectRoot, 'PASS all tests')
-  const hook = await getHook(projectRoot, mockLlmResponse(llmResponse))
+  const hook = await getHook(
+    projectRoot,
+    mockSdkClientWithSession('PASS all tests', mockLlmResponse(llmResponse)),
+  )
   return { projectRoot, hook }
 }
 

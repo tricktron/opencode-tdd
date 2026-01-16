@@ -1,38 +1,10 @@
 import type { Plugin } from '@opencode-ai/plugin'
-import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
 import { formatError, safeLog, type AppLogger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
-
-const getTestOutputFromFile = async (
-  projectRoot: string,
-  config: TDDConfig,
-) => {
-  if (!config.testOutputFile) {
-    throw new Error('testOutputFile not configured')
-  }
-
-  const testOutputPath = join(projectRoot, config.testOutputFile)
-  const testOutputStat = await stat(testOutputPath).catch(() => null)
-  if (!testOutputStat) {
-    throw new Error(
-      'TDD violation: Run tests first before editing implementation.',
-    )
-  }
-
-  const ageSeconds = (Date.now() - testOutputStat.mtimeMs) / 1000
-  const maxAge = config.maxTestOutputAge ?? 300
-  if (ageSeconds > maxAge) {
-    throw new Error(
-      'TDD violation: Test output is stale. Re-run tests before editing.',
-    )
-  }
-
-  return readFile(testOutputPath, 'utf8')
-}
 
 const getTestOutputFromSession = async (
   sdkClient: SdkClient,
@@ -80,23 +52,13 @@ const getTestOutputFromSession = async (
 }
 
 const getTestOutput = async (
-  projectRoot: string,
-  config: TDDConfig,
   sdkClient: SdkClient | undefined,
   sessionId: string,
 ): Promise<string> => {
-  // Prefer session-based if no testOutputFile configured
-  if (!config.testOutputFile && sdkClient) {
-    return getTestOutputFromSession(sdkClient, sessionId)
+  if (!sdkClient) {
+    throw new Error('SDK client required for session-based test output')
   }
-
-  // Fall back to file-based if testOutputFile is configured
-  if (config.testOutputFile) {
-    return getTestOutputFromFile(projectRoot, config)
-  }
-
-  // If no SDK client and no file, we can't get test output
-  throw new Error('No test output source available')
+  return getTestOutputFromSession(sdkClient, sessionId)
 }
 
 type ToolPart = {
@@ -294,12 +256,7 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const testOutput = await getTestOutput(
-        projectRoot,
-        configResult.config,
-        sdkClient,
-        input.sessionID,
-      )
+      const testOutput = await getTestOutput(sdkClient, input.sessionID)
 
       const editContent = getEditContent(input.tool, output.args)
 

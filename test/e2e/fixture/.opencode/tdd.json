@@ -1,8 +1,4 @@
 {
-    "testOutputFile": ".opencode/tdd/smoke-test-output.txt",
-    "enforcePatterns": [
-        "**/src/**",
-        "**/test/**"
-    ],
-    "verifierModel": "opencode/minimax-m2.1-free"
+  "enforcePatterns": ["**/src/**", "**/test/**"],
+  "verifierModel": "opencode/minimax-m2.1-free"
 }

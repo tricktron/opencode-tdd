@@ -24,7 +24,6 @@ const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
 })
 
 const baseConfig = {
-  testOutputFile: '.opencode/tdd/test-output.txt',
   enforcePatterns: ['src/**', 'test/**'],
   verifierModel: 'test-model',
 }
@@ -39,12 +38,51 @@ const writeConfig = async (projectRoot: string, config: unknown) => {
   await writeFile(configPath, JSON.stringify(config))
 }
 
-const writeTestOutput = async (projectRoot: string, content: string) => {
-  const tddDir = join(projectRoot, '.opencode', 'tdd')
-  await mkdir(tddDir, { recursive: true })
-  const testOutputPath = join(tddDir, 'test-output.txt')
-  await writeFile(testOutputPath, content)
-  return testOutputPath
+const mockSdkClientWithSession = (
+  testOutput: string,
+  llmClient?: ReturnType<typeof mockClient>,
+) => {
+  const combined = {
+    session: {
+      messages: async () => ({
+        data: [
+          {
+            info: { id: 'msg-1', role: 'assistant' },
+            parts: [
+              {
+                type: 'tool',
+                tool: 'bash',
+                state: {
+                  status: 'completed',
+                  output: testOutput,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+      create: async () => ({ data: { id: 'test-session-id' } }),
+      prompt: async () => ({
+        data: {
+          parts: [
+            {
+              type: 'text',
+              text: llmClient ? await llmClient.chat() : 'ALLOW',
+            },
+          ],
+        },
+      }),
+      delete: async () => ({}),
+    },
+    app: { log: async () => ({}) },
+  }
+
+  // If llmClient is provided, also include it directly for duck-typing
+  if (llmClient) {
+    return Object.assign(combined, llmClient)
+  }
+
+  return combined
 }
 
 const getHook = async (projectRoot: string, client?: unknown) => {
@@ -75,47 +113,37 @@ const callHook = (
   )
 
 describe('Actionable Error Messages', () => {
-  test('given missing test output, when edit attempted, then error uses "TDD violation:" prefix and actionable instruction', async () => {
+  test('given no session history, when edit attempted, then error uses actionable instruction', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
 
-    const hook = await getHook(projectRoot)
+    const mockSdkClient = {
+      session: {
+        messages: async () => ({
+          data: [],
+        }),
+      },
+    }
+
+    const hook = await getHook(projectRoot, mockSdkClient)
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Run tests first before editing implementation.',
-    )
-  })
-
-  test('given stale test output, when edit attempted, then error uses "TDD violation:" prefix and actionable instruction', async () => {
-    const projectRoot = await createProjectRoot()
-    await writeConfig(projectRoot, baseConfig)
-    const testOutputPath = await writeTestOutput(
-      projectRoot,
-      'PASS test output',
-    )
-
-    // Make it stale (301 seconds old, default maxAge is 300)
-    const staleTime = new Date(Date.now() - 301 * 1000)
-    const { utimes } = await import('node:fs/promises')
-    await utimes(testOutputPath, staleTime, staleTime)
-
-    const hook = await getHook(projectRoot)
-
-    await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Test output is stale. Re-run tests before editing.',
+      'No bash command output found in session. Run tests first.',
     )
   })
 
   test('given LLM blocks edit, when thrown, then error uses "TDD violation:" prefix', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     const mockClient = {
       chat: async () => 'BLOCK: Write a failing test first',
     }
 
-    const hook = await getHook(projectRoot, mockClient)
+    const hook = await getHook(
+      projectRoot,
+      mockSdkClientWithSession('PASS test output', mockClient),
+    )
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD violation: Write a failing test first',
@@ -137,13 +165,15 @@ describe('Actionable Error Messages', () => {
   test('given verifier parse error through hook, when thrown, then includes "TDD violation:" prefix', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     const mockClient = {
       chat: async () => 'invalid response text',
     }
 
-    const hook = await getHook(projectRoot, mockClient)
+    const hook = await getHook(
+      projectRoot,
+      mockSdkClientWithSession('PASS test output', mockClient),
+    )
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD violation: Verification failed. Please retry this edit.',
@@ -153,13 +183,15 @@ describe('Actionable Error Messages', () => {
   test('given verifier returns BLOCK with custom reason, when thrown, then includes actionable instruction', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-    await writeTestOutput(projectRoot, 'PASS test output')
 
     const mockClient = {
       chat: async () => 'BLOCK: Fix existing failing test first',
     }
 
-    const hook = await getHook(projectRoot, mockClient)
+    const hook = await getHook(
+      projectRoot,
+      mockSdkClientWithSession('PASS test output', mockClient),
+    )
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD violation: Fix existing failing test first',

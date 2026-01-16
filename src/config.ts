@@ -2,10 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type TDDConfig = {
-  testOutputFile?: string
-  enforcePatterns?: string[]
   verifierModel: string
-  maxTestOutputAge?: number
+  enforcePatterns: string[]
 }
 
 export type ConfigLoadResult =
@@ -21,6 +19,9 @@ const requireString = (value: unknown, field: string) => {
 }
 
 const requireStringArray = (value: unknown, field: string) => {
+  if (value === undefined || value === null) {
+    throw new Error(`TDD: Missing config field: ${field}`)
+  }
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new Error(`TDD: ${field} must be an array of strings`)
   }
@@ -44,28 +45,17 @@ export const loadConfig = async (
     throw new Error('TDD: Invalid config JSON')
   }
 
-  let testOutputFile: string | undefined
-  if (config.testOutputFile !== undefined) {
-    testOutputFile = requireString(config.testOutputFile, 'testOutputFile')
-  }
-  let enforcePatterns: string[] | undefined
-  if (config.enforcePatterns !== undefined) {
-    enforcePatterns = requireStringArray(
-      config.enforcePatterns,
-      'enforcePatterns',
-    )
-  }
   const verifierModel = requireString(config.verifierModel, 'verifierModel')
-  const maxTestOutputAge =
-    typeof config.maxTestOutputAge === 'number' ? config.maxTestOutputAge : 300
+  const enforcePatterns = requireStringArray(
+    config.enforcePatterns,
+    'enforcePatterns',
+  )
 
   return {
     kind: 'loaded',
     config: {
-      testOutputFile,
-      enforcePatterns,
       verifierModel,
-      maxTestOutputAge,
+      enforcePatterns,
     },
   }
 }
