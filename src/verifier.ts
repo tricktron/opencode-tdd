@@ -53,14 +53,18 @@ type ParsedResponse = {
 const parseResponse = (response: string): ParsedResponse => {
   const trimmed = response.trim()
 
-  if (trimmed === 'ALLOW') {
-    return { decision: 'allow', reason: '' }
-  }
-  if (trimmed.startsWith('BLOCK:')) {
+  // Search for BLOCK: anywhere (LLM often adds reasoning before)
+  const blockMatch = trimmed.match(/\*{0,2}BLOCK:\*{0,2}\s*(.*)$/m)
+  if (blockMatch) {
     const reason =
-      trimmed.slice(6).trim() ||
+      blockMatch[1].replace(/^\*+|\*+$/g, '').trim() ||
       'Write a failing test first, then retry this edit.'
     return { decision: 'block', reason }
+  }
+
+  // Search for ALLOW anywhere
+  if (/\bALLOW\b/.test(trimmed)) {
+    return { decision: 'allow', reason: '' }
   }
 
   // Parse error - default to actionable block reason instead of exposing internal failure
