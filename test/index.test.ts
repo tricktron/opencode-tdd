@@ -458,13 +458,13 @@ describe('TDDPlugin', () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, {
       enforcePatterns: ['src/**'],
-      verifierModel: 'test-model',
+      // Missing verifierModel
     })
 
     const hook = await getHook(projectRoot)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Missing config field: testOutputFile',
+      'TDD: Missing config field: verifierModel',
     )
   })
 

@@ -2,10 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export type TDDConfig = {
-  testOutputFile: string
+  testOutputFile?: string
   enforcePatterns?: string[]
   verifierModel: string
-  maxTestOutputAge: number
+  maxTestOutputAge?: number
 }
 
 export type ConfigLoadResult =
@@ -44,7 +44,10 @@ export const loadConfig = async (
     throw new Error('TDD: Invalid config JSON')
   }
 
-  const testOutputFile = requireString(config.testOutputFile, 'testOutputFile')
+  let testOutputFile: string | undefined
+  if (config.testOutputFile !== undefined) {
+    testOutputFile = requireString(config.testOutputFile, 'testOutputFile')
+  }
   let enforcePatterns: string[] | undefined
   if (config.enforcePatterns !== undefined) {
     enforcePatterns = requireStringArray(

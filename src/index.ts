@@ -7,7 +7,14 @@ import { loadConfig, type TDDConfig } from './config'
 import { formatError, safeLog, type AppLogger } from './logger'
 import { verifyEdit, type LlmClient } from './verifier'
 
-const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
+const getTestOutputFromFile = async (
+  projectRoot: string,
+  config: TDDConfig,
+) => {
+  if (!config.testOutputFile) {
+    throw new Error('testOutputFile not configured')
+  }
+
   const testOutputPath = join(projectRoot, config.testOutputFile)
   const testOutputStat = await stat(testOutputPath).catch(() => null)
   if (!testOutputStat) {
@@ -17,7 +24,8 @@ const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
   }
 
   const ageSeconds = (Date.now() - testOutputStat.mtimeMs) / 1000
-  if (ageSeconds > config.maxTestOutputAge) {
+  const maxAge = config.maxTestOutputAge ?? 300
+  if (ageSeconds > maxAge) {
     throw new Error(
       'TDD violation: Test output is stale. Re-run tests before editing.',
     )
@@ -25,6 +33,82 @@ const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
 
   return readFile(testOutputPath, 'utf8')
 }
+
+const getTestOutputFromSession = async (
+  sdkClient: SdkClient,
+  sessionId: string,
+): Promise<string> => {
+  let messagesResponse
+  try {
+    messagesResponse = await sdkClient.session.messages({
+      path: { id: sessionId },
+    })
+  } catch (error) {
+    throw new Error('Failed to read session history')
+  }
+
+  if (messagesResponse.error || !messagesResponse.data) {
+    throw new Error('Failed to read session history')
+  }
+
+  const messages = messagesResponse.data
+
+  // Extract completed bash tool outputs
+  const bashOutputs: string[] = []
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (
+        part.type === 'tool' &&
+        (part as { tool?: string }).tool === 'bash' &&
+        (part as { state?: { status?: string } }).state?.status === 'completed'
+      ) {
+        const output = (part as { state: { output?: string } }).state.output
+        if (output) {
+          bashOutputs.push(output)
+        }
+      }
+    }
+  }
+
+  if (bashOutputs.length === 0) {
+    throw new Error('No bash command output found in session. Run tests first.')
+  }
+
+  // Take last 5 outputs
+  const last5 = bashOutputs.slice(-5)
+  return last5.join('\n\n')
+}
+
+const getTestOutput = async (
+  projectRoot: string,
+  config: TDDConfig,
+  sdkClient: SdkClient | undefined,
+  sessionId: string,
+): Promise<string> => {
+  // Prefer session-based if no testOutputFile configured
+  if (!config.testOutputFile && sdkClient) {
+    return getTestOutputFromSession(sdkClient, sessionId)
+  }
+
+  // Fall back to file-based if testOutputFile is configured
+  if (config.testOutputFile) {
+    return getTestOutputFromFile(projectRoot, config)
+  }
+
+  // If no SDK client and no file, we can't get test output
+  throw new Error('No test output source available')
+}
+
+type ToolPart = {
+  type: 'tool'
+  tool?: string
+  state?: {
+    status?: string
+    output?: string
+  }
+}
+
+type Part = { type: string } | ToolPart
 
 type SdkClient = {
   session: {
@@ -42,6 +126,13 @@ type SdkClient = {
       error?: unknown
     }>
     delete: (opts: { path: { id: string } }) => Promise<unknown>
+    messages: (opts: { path: { id: string } }) => Promise<{
+      data?: Array<{
+        info: { id: string; role: string }
+        parts: Part[]
+      }>
+      error?: unknown
+    }>
   }
   app: AppLogger
 }
@@ -203,7 +294,12 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      const testOutput = await getTestOutput(projectRoot, configResult.config)
+      const testOutput = await getTestOutput(
+        projectRoot,
+        configResult.config,
+        sdkClient,
+        input.sessionID,
+      )
 
       const editContent = getEditContent(input.tool, output.args)
 
