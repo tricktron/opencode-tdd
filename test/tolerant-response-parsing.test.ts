@@ -71,7 +71,7 @@ describe('Tolerant Response Parsing', () => {
     const client = mockClient('This is an invalid response with no decision')
 
     await expect(verifyEdit(verifyOpts(client))).rejects.toThrow(
-      'Write a failing test first, then retry this edit.',
+      'Verification failed. Please retry this edit.',
     )
   })
 
@@ -79,7 +79,7 @@ describe('Tolerant Response Parsing', () => {
     const client = mockClient('BLOCK:')
 
     await expect(verifyEdit(verifyOpts(client))).rejects.toThrow(
-      'Write a failing test first, then retry this edit.',
+      'Verification failed. Please retry this edit.',
     )
   })
 })

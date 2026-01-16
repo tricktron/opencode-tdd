@@ -125,12 +125,12 @@ describe('Actionable Error Messages', () => {
   test('given verifier returns invalid response, when parsed, then defaults to actionable block reason', async () => {
     await expect(
       verifyEdit(verifyOpts(mockClient('invalid response text'))),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
   })
 
   test('given verifier returns BLOCK without reason, when parsed, then defaults to actionable block reason', async () => {
     await expect(verifyEdit(verifyOpts(mockClient('BLOCK:')))).rejects.toThrow(
-      'Write a failing test first, then retry this edit.',
+      'Verification failed. Please retry this edit.',
     )
   })
 
@@ -146,7 +146,7 @@ describe('Actionable Error Messages', () => {
     const hook = await getHook(projectRoot, mockClient)
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Write a failing test first, then retry this edit.',
+      'TDD violation: Verification failed. Please retry this edit.',
     )
   })
 

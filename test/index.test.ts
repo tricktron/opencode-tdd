@@ -39,7 +39,7 @@ describe('Verifier', () => {
 
     await expect(
       verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
   })
 
   test('given plain text response with parse error, when auditor present, then records block decision with actionable reason', async () => {
@@ -51,7 +51,7 @@ describe('Verifier', () => {
         ...verifyOpts(mockClient('invalid response')),
         auditor,
       }),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
 
     const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
     const auditContent = await readFile(auditPath, 'utf8')
@@ -64,9 +64,7 @@ describe('Verifier', () => {
     expect(entry.filePath).toBe('file.ts')
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('invalid response')
-    expect(entry.reason).toBe(
-      'Write a failing test first, then retry this edit.',
-    )
+    expect(entry.reason).toBe('Verification failed. Please retry this edit.')
   })
 
   // Slice: 10-truncated-response-in-errors (replaced by actionable errors in slice 12)
@@ -76,13 +74,13 @@ describe('Verifier', () => {
 
     await expect(
       verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
   })
 
   test('given short invalid response, when parse fails, then defaults to actionable block reason', async () => {
     await expect(
       verifyEdit(verifyOpts(mockClient('not valid json'))),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
   })
 
   // Slice: 09-audit-failed-responses (updated by slice 12 for actionable errors)
@@ -96,7 +94,7 @@ describe('Verifier', () => {
         ...verifyOpts(mockClient('not valid json')),
         auditor,
       }),
-    ).rejects.toThrow('Write a failing test first, then retry this edit.')
+    ).rejects.toThrow('Verification failed. Please retry this edit.')
 
     const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
     const auditContent = await readFile(auditPath, 'utf8')
@@ -109,9 +107,7 @@ describe('Verifier', () => {
     expect(entry.filePath).toBe('file.ts')
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('not valid json')
-    expect(entry.reason).toBe(
-      'Write a failing test first, then retry this edit.',
-    )
+    expect(entry.reason).toBe('Verification failed. Please retry this edit.')
   })
 
   const blockTests = [
@@ -125,12 +121,12 @@ describe('Verifier', () => {
     {
       name: 'given invalid plain text response, defaults to actionable block reason',
       response: 'not valid response',
-      expectedError: 'Write a failing test first, then retry this edit.',
+      expectedError: 'Verification failed. Please retry this edit.',
     },
     {
       name: 'given missing reason in BLOCK, throws with actionable default reason',
       response: 'BLOCK:',
-      expectedError: 'Write a failing test first, then retry this edit.',
+      expectedError: 'Verification failed. Please retry this edit.',
     },
     {
       name: 'given BLOCK with reason, throws with reason',
