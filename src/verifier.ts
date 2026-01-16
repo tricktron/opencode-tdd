@@ -42,7 +42,9 @@ Outside-In TDD Rules:
 - unitFailingTests > 1 → BLOCK
 - Adding acceptance test while one is red → BLOCK
 - Adding unit test while one is red → BLOCK
-- Implementation with 0 unit failing tests → BLOCK (write test first)
+- Implementation with 0 unit failing tests:
+  - If acceptance test failing → ALLOW (scaffolding phase)
+  - Otherwise → BLOCK (write unit test first)
 - Implementation with 1 unit failing test → ALLOW
 - Modifying the red acceptance test → ALLOW (refinement ok)
 - Refactoring → ALLOW
