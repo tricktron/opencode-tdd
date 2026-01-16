@@ -42,50 +42,9 @@ describe('Verifier', () => {
     ).rejects.toThrow('Verification failed. Please retry this edit.')
   })
 
-  test('given plain text response with parse error, when auditor present, then records block decision with actionable reason', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
-    const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
-
-    await expect(
-      verifyEdit({
-        ...verifyOpts(mockClient('invalid response')),
-        auditor,
-      }),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-
-    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
-    const auditContent = await readFile(auditPath, 'utf8')
-    const entry = JSON.parse(auditContent.trim())
-
-    expect(entry.decision).toBe('block')
-    expect(entry.timestamp).toMatch(
-      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
-    )
-    expect(entry.filePath).toBe('file.ts')
-    expect(entry.prompt).toContain('file.ts')
-    expect(entry.response).toBe('invalid response')
-    expect(entry.reason).toBe('Verification failed. Please retry this edit.')
-  })
-
-  // Slice: 10-truncated-response-in-errors (replaced by actionable errors in slice 12)
-  // Parse errors now default to actionable block reason instead of exposing raw response
-  test('given invalid JSON response, when parse fails, then defaults to actionable block reason', async () => {
-    const longInvalidResponse = 'x'.repeat(150)
-
-    await expect(
-      verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-  })
-
-  test('given short invalid response, when parse fails, then defaults to actionable block reason', async () => {
-    await expect(
-      verifyEdit(verifyOpts(mockClient('not valid json'))),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-  })
-
   // Slice: 09-audit-failed-responses (updated by slice 12 for actionable errors)
-  // Given verifier receives invalid JSON, audit entry is written with actionable reason
-  test('given invalid JSON response, when parse fails, then audit entry is written with actionable reason', async () => {
+  // Given verifier receives invalid response, audit entry is written with actionable reason
+  test('given invalid response, when parse fails, then audit entry is written with actionable reason', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
     const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
 
