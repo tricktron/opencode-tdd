@@ -21,9 +21,16 @@ export type VerifyEditOptions = {
 const SYSTEM_PROMPT = `You are a TDD (Test-Driven Development) compliance verifier supporting outside-in TDD.
 
 First, analyze the edit:
-1. Count failing tests by scope (acceptance vs unit)
-2. Classify edit type (test, implementation, or refactor)
-3. Apply outside-in TDD rules
+1. Check if test output shows compile/syntax errors
+2. Count failing tests by scope (acceptance vs unit)
+3. Classify edit type (test, implementation, or refactor)
+4. Apply outside-in TDD rules
+
+Compile Error Handling:
+- If test output shows compile/syntax errors (code doesn't run):
+  - Fixing the compile error → ALLOW (restore runnable state)
+  - Adding new implementation beyond the fix → BLOCK (write test first)
+- Compile errors are NOT counted as failing tests
 
 Test Scopes:
 - Acceptance: guides the slice, verifies user-facing behavior end-to-end
