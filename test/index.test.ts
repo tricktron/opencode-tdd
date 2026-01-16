@@ -34,17 +34,15 @@ describe('Verifier', () => {
     ).rejects.toThrow('Write a failing test first')
   })
 
-  test('given invalid plain text response, when parse fails, then error includes truncated response', async () => {
+  test('given invalid plain text response, when parse fails, then defaults to actionable block reason', async () => {
     const longInvalidResponse = 'x'.repeat(150)
 
     await expect(
       verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow(
-      'Invalid verifier response (got: "' + 'x'.repeat(100) + '...")',
-    )
+    ).rejects.toThrow('Write a failing test first, then retry this edit.')
   })
 
-  test('given plain text response with parse error, when auditor present, then records parse_error audit entry', async () => {
+  test('given plain text response with parse error, when auditor present, then records block decision with actionable reason', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
     const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
 
@@ -53,7 +51,7 @@ describe('Verifier', () => {
         ...verifyOpts(mockClient('invalid response')),
         auditor,
       }),
-    ).rejects.toThrow('Invalid verifier response')
+    ).rejects.toThrow('Write a failing test first, then retry this edit.')
 
     const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
     const auditContent = await readFile(auditPath, 'utf8')
@@ -67,31 +65,29 @@ describe('Verifier', () => {
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('invalid response')
     expect(entry.reason).toBe(
-      'Invalid verifier response (got: "invalid response")',
+      'Write a failing test first, then retry this edit.',
     )
   })
 
-  // Slice: 10-truncated-response-in-errors
-  // Given invalid verifier response, when parse fails, then error includes truncated response
-  test('given invalid JSON response, when parse fails, then error includes first 100 chars', async () => {
+  // Slice: 10-truncated-response-in-errors (replaced by actionable errors in slice 12)
+  // Parse errors now default to actionable block reason instead of exposing raw response
+  test('given invalid JSON response, when parse fails, then defaults to actionable block reason', async () => {
     const longInvalidResponse = 'x'.repeat(150)
 
     await expect(
       verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow(
-      'Invalid verifier response (got: "' + 'x'.repeat(100) + '...")',
-    )
+    ).rejects.toThrow('Write a failing test first, then retry this edit.')
   })
 
-  test('given short invalid response, when parse fails, then error includes full response without ellipsis', async () => {
+  test('given short invalid response, when parse fails, then defaults to actionable block reason', async () => {
     await expect(
       verifyEdit(verifyOpts(mockClient('not valid json'))),
-    ).rejects.toThrow('Invalid verifier response (got: "not valid json")')
+    ).rejects.toThrow('Write a failing test first, then retry this edit.')
   })
 
-  // Slice: 09-audit-failed-responses
-  // Given verifier receives invalid JSON, when parseResponse fails, then audit entry is written before throwing
-  test('given invalid JSON response, when parse fails, then audit entry is written', async () => {
+  // Slice: 09-audit-failed-responses (updated by slice 12 for actionable errors)
+  // Given verifier receives invalid JSON, audit entry is written with actionable reason
+  test('given invalid JSON response, when parse fails, then audit entry is written with actionable reason', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
     const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
 
@@ -100,7 +96,7 @@ describe('Verifier', () => {
         ...verifyOpts(mockClient('not valid json')),
         auditor,
       }),
-    ).rejects.toThrow('Invalid verifier response')
+    ).rejects.toThrow('Write a failing test first, then retry this edit.')
 
     const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
     const auditContent = await readFile(auditPath, 'utf8')
@@ -114,7 +110,7 @@ describe('Verifier', () => {
     expect(entry.prompt).toContain('file.ts')
     expect(entry.response).toBe('not valid json')
     expect(entry.reason).toBe(
-      'Invalid verifier response (got: "not valid json")',
+      'Write a failing test first, then retry this edit.',
     )
   })
 
@@ -127,14 +123,14 @@ describe('Verifier', () => {
       expectedError: 'Verification failed: Network error',
     },
     {
-      name: 'given invalid plain text response, throws with Invalid verifier response',
+      name: 'given invalid plain text response, defaults to actionable block reason',
       response: 'not valid response',
-      expectedError: 'Invalid verifier response (got: "not valid response")',
+      expectedError: 'Write a failing test first, then retry this edit.',
     },
     {
-      name: 'given missing reason in BLOCK, throws with default reason',
+      name: 'given missing reason in BLOCK, throws with actionable default reason',
       response: 'BLOCK:',
-      expectedError: 'Write a failing test first',
+      expectedError: 'Write a failing test first, then retry this edit.',
     },
     {
       name: 'given BLOCK with reason, throws with reason',
@@ -185,7 +181,7 @@ describe('Edge Cases', () => {
     await utimes(testOutputPath, pastBoundary, pastBoundary)
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Re-run tests',
+      'TDD violation: Test output is stale. Re-run tests before editing.',
     )
   })
 
@@ -294,7 +290,7 @@ describe('LLM-Based Edit Classification', () => {
     })
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Write a failing test',
+      'TDD violation: Write a failing test',
     )
   })
 
@@ -322,7 +318,7 @@ describe('OneFailingTestRule', () => {
     })
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Fix existing failing test first',
+      'TDD violation: Fix existing failing test first',
     )
   })
 
@@ -362,7 +358,7 @@ describe('OneFailingTestRule', () => {
     })
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Write a failing test',
+      'TDD violation: Write a failing test',
     )
   })
 
@@ -440,7 +436,7 @@ describe('EnforcePatterns', () => {
     )
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Write a failing test',
+      'TDD violation: Write a failing test',
     )
   })
 
@@ -552,7 +548,7 @@ describe('TDDPlugin', () => {
     const hook = await getHook(projectRoot)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Run tests first',
+      'TDD violation: Run tests first before editing implementation.',
     )
   })
 
@@ -560,7 +556,7 @@ describe('TDDPlugin', () => {
     const { hook } = await setupStaleTestOutput(2, 1)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Re-run tests',
+      'TDD violation: Test output is stale. Re-run tests before editing.',
     )
   })
 
@@ -568,7 +564,7 @@ describe('TDDPlugin', () => {
     const { hook } = await setupStaleTestOutput(301)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Re-run tests',
+      'TDD violation: Test output is stale. Re-run tests before editing.',
     )
   })
 
@@ -594,7 +590,7 @@ describe('TDDPlugin', () => {
     })
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD: Write a failing test first',
+      'TDD violation: Write a failing test first',
     )
   })
 
@@ -914,7 +910,7 @@ describe('Outside-In TDD Enforcement', () => {
 
       return expect(
         callHook(hook, 'edit', 'test/acceptance/new-feature.test.ts'),
-      ).rejects.toThrow('TDD: Finish current feature first')
+      ).rejects.toThrow('TDD violation: Finish current feature first')
     })
 
     test('given 1 red acceptance test, when modifying that test, then allows', async () => {
@@ -961,7 +957,7 @@ describe('Outside-In TDD Enforcement', () => {
 
       return expect(
         callHook(hook, 'edit', 'test/unit/parser.test.ts'),
-      ).rejects.toThrow('TDD: Fix failing test first')
+      ).rejects.toThrow('TDD violation: Fix failing test first')
     })
   })
 
@@ -977,7 +973,7 @@ describe('Outside-In TDD Enforcement', () => {
       })
 
       return expect(callHook(hook, 'edit', 'src/validator.ts')).rejects.toThrow(
-        'TDD: Write a failing test first',
+        'TDD violation: Write a failing test first',
       )
     })
 
@@ -1007,7 +1003,7 @@ describe('Outside-In TDD Enforcement', () => {
       })
 
       return expect(callHook(hook, 'edit', 'src/checkout.ts')).rejects.toThrow(
-        'TDD: Write a failing test first',
+        'TDD violation: Write a failing test first',
       )
     })
   })
@@ -1042,7 +1038,7 @@ describe('Outside-In TDD Enforcement', () => {
 
       return expect(
         callHook(hook, 'edit', 'test/acceptance/checkout.test.ts'),
-      ).rejects.toThrow('TDD: Fix failing tests first')
+      ).rejects.toThrow('TDD violation: Fix failing tests first')
     })
 
     test('given 2+ unit tests failing, then blocks', async () => {
@@ -1057,7 +1053,7 @@ describe('Outside-In TDD Enforcement', () => {
 
       return expect(
         callHook(hook, 'edit', 'test/unit/validator.test.ts'),
-      ).rejects.toThrow('TDD: Fix failing tests first')
+      ).rejects.toThrow('TDD violation: Fix failing tests first')
     })
   })
 })

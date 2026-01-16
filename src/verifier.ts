@@ -57,13 +57,17 @@ const parseResponse = (response: string): ParsedResponse => {
     return { decision: 'allow', reason: '' }
   }
   if (trimmed.startsWith('BLOCK:')) {
-    const reason = trimmed.slice(6).trim() || 'Write a failing test first'
+    const reason =
+      trimmed.slice(6).trim() ||
+      'Write a failing test first, then retry this edit.'
     return { decision: 'block', reason }
   }
 
-  const truncated = response.slice(0, 100)
-  const suffix = response.length > 100 ? '...' : ''
-  throw new Error(`Invalid verifier response (got: "${truncated}${suffix}")`)
+  // Parse error - default to actionable block reason instead of exposing internal failure
+  return {
+    decision: 'block',
+    reason: 'Write a failing test first, then retry this edit.',
+  }
 }
 
 export const verifyEdit = async (opts: VerifyEditOptions): Promise<void> => {

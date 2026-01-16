@@ -11,12 +11,16 @@ const getTestOutput = async (projectRoot: string, config: TDDConfig) => {
   const testOutputPath = join(projectRoot, config.testOutputFile)
   const testOutputStat = await stat(testOutputPath).catch(() => null)
   if (!testOutputStat) {
-    throw new Error('TDD: Run tests first')
+    throw new Error(
+      'TDD violation: Run tests first before editing implementation.',
+    )
   }
 
   const ageSeconds = (Date.now() - testOutputStat.mtimeMs) / 1000
   if (ageSeconds > config.maxTestOutputAge) {
-    throw new Error('TDD: Re-run tests')
+    throw new Error(
+      'TDD violation: Test output is stale. Re-run tests before editing.',
+    )
   }
 
   return readFile(testOutputPath, 'utf8')
@@ -157,7 +161,7 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`TDD: ${message}`)
+    throw new Error(`TDD violation: ${message}`)
   }
 }
 
