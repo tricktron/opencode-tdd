@@ -4,22 +4,7 @@ import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
 import { formatError, safeLog, type AppLogger } from './logger'
-import {
-  verifyEdit,
-  verifyEditWithTestRunner,
-  type LlmClient,
-} from './verifier'
-
-type ToolPart = {
-  type: 'tool'
-  tool?: string
-  state?: {
-    status?: string
-    output?: string
-  }
-}
-
-type Part = { type: string } | ToolPart
+import { verifyEditWithTestRunner } from './verifier'
 
 type SdkClient = {
   session: {
@@ -41,7 +26,7 @@ type SdkClient = {
     messages: (opts: { path: { id: string } }) => Promise<{
       data?: Array<{
         info: { id: string; role: string }
-        parts: Part[]
+        parts: Array<{ type: string }>
       }>
       error?: unknown
     }>

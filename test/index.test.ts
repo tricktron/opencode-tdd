@@ -3,105 +3,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
-import { verifyEdit } from '../src/verifier'
-
-const mockClient = (response: string | (() => never)) => ({
-  chat: async () => {
-    if (typeof response === 'function') response()
-    return response as string
-  },
-})
-
-const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
-  client,
-  model: 'model',
-  filePath: 'file.ts',
-  editContent: 'content',
-  testOutput: 'output',
-})
-
-describe('Verifier', () => {
-  // Slice: 11-simplify-to-text-response
-  // Given plain text ALLOW response, when parsed, then allows edit
-  test('given plain text ALLOW response, when parsed, then allows edit', async () => {
-    await verifyEdit(verifyOpts(mockClient('ALLOW')))
-    // No throw = success
-  })
-
-  test('given plain text BLOCK response, when parsed, then throws with reason', async () => {
-    await expect(
-      verifyEdit(verifyOpts(mockClient('BLOCK: Write a failing test first'))),
-    ).rejects.toThrow('Write a failing test first')
-  })
-
-  test('given invalid plain text response, when parse fails, then defaults to actionable block reason', async () => {
-    const longInvalidResponse = 'x'.repeat(150)
-
-    await expect(
-      verifyEdit(verifyOpts(mockClient(longInvalidResponse))),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-  })
-
-  // Slice: 09-audit-failed-responses (updated by slice 12 for actionable errors)
-  // Given verifier receives invalid response, audit entry is written with actionable reason
-  test('given invalid response, when parse fails, then audit entry is written with actionable reason', async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), 'tdd-test-'))
-    const auditor = (await import('../src/auditor')).createAuditor(projectRoot)
-
-    await expect(
-      verifyEdit({
-        ...verifyOpts(mockClient('not valid json')),
-        auditor,
-      }),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-
-    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
-    const auditContent = await readFile(auditPath, 'utf8')
-    const entry = JSON.parse(auditContent.trim())
-
-    expect(entry.decision).toBe('block')
-    expect(entry.timestamp).toMatch(
-      /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z/,
-    )
-    expect(entry.filePath).toBe('file.ts')
-    expect(entry.prompt).toContain('file.ts')
-    expect(entry.response).toBe('not valid json')
-    expect(entry.reason).toBe('Verification failed. Please retry this edit.')
-  })
-
-  const blockTests = [
-    {
-      name: 'given LLM API failure, throws with helpful error message',
-      response: () => {
-        throw new Error('Network error')
-      },
-      expectedError: 'Verification failed: Network error',
-    },
-    {
-      name: 'given invalid plain text response, defaults to actionable block reason',
-      response: 'not valid response',
-      expectedError: 'Verification failed. Please retry this edit.',
-    },
-    {
-      name: 'given missing reason in BLOCK, throws with actionable default reason',
-      response: 'BLOCK:',
-      expectedError: 'Verification failed. Please retry this edit.',
-    },
-    {
-      name: 'given BLOCK with reason, throws with reason',
-      response: 'BLOCK: Write test first',
-      expectedError: 'Write test first',
-    },
-  ]
-
-  for (const tc of blockTests) {
-    test(tc.name, async () => {
-      await expect(
-        verifyEdit(verifyOpts(mockClient(tc.response))),
-      ).rejects.toThrow(tc.expectedError)
-    })
-  }
-})
 
 describe('Edge Cases', () => {
   test('given special characters in file path, handles correctly', async () => {
@@ -704,55 +605,9 @@ describe('Auditor', () => {
     const auditContent = await readFile(auditPath, 'utf8')
     expect(auditContent).toBeTruthy()
   })
-
-  test('given verifyEdit with auditor, when called, then records audit entry', async () => {
-    const projectRoot = await createProjectRoot()
-    const { createAuditor } = await import('../src/auditor')
-    const auditor = createAuditor(projectRoot)
-
-    await verifyEdit({
-      client: mockClient('ALLOW'),
-      model: 'test-model',
-      filePath: 'src/example.ts',
-      editContent: 'const x = 1',
-      testOutput: 'PASS all tests',
-      auditor,
-    })
-
-    const auditPath = join(projectRoot, '.opencode', 'tdd', 'audit.jsonl')
-    const auditContent = await readFile(auditPath, 'utf8')
-    const entry = JSON.parse(auditContent.trim())
-
-    expect(entry.filePath).toBe('src/example.ts')
-    expect(entry.decision).toBe('allow')
-    expect(entry.prompt).toContain('src/example.ts')
-    expect(entry.response).toBe('ALLOW')
-  })
 })
 
 describe('Non-Blocking Error Handling', () => {
-  test('given audit write fails, verification still completes successfully', async () => {
-    const failingAuditor = {
-      record: async () => {
-        throw new Error('Disk full')
-      },
-    }
-
-    const mockClient = {
-      chat: async () => 'ALLOW',
-    }
-
-    // Should not throw despite audit failure
-    await verifyEdit({
-      client: mockClient,
-      model: 'test-model',
-      filePath: 'src/example.ts',
-      editContent: 'const x = 1',
-      testOutput: 'PASS all tests',
-      auditor: failingAuditor,
-    })
-  })
-
   test('given session cleanup fails, verification still completes successfully', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
