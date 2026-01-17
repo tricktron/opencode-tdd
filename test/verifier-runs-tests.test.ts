@@ -188,4 +188,38 @@ describe('Verifier Runs Tests', () => {
 
     expect(deletedSessionId).toBe('child-to-delete')
   })
+
+  // Slice: 22-e2e-verifier-runs-tests
+  // Unit Test 6: Verifier requests bash tool access in child session
+  it('passes tools: { bash: true } to child session prompt', async () => {
+    let promptOptions: any = null
+    const mockClient = {
+      session: {
+        create: async () => ({ data: { id: 'child-session-6' } }),
+        prompt: async (opts: any) => {
+          promptOptions = opts
+          return {
+            data: {
+              parts: [{ type: 'text', text: 'ALLOW' }],
+            },
+          }
+        },
+        delete: async () => ({}),
+      },
+    }
+
+    const { verifyEditWithTestRunner } = await import('../src/verifier')
+
+    await verifyEditWithTestRunner({
+      sdkClient: mockClient as any,
+      parentSessionId: 'parent-6',
+      model: 'opencode/test',
+      filePath: 'src/foo.ts',
+      editContent: 'export const foo = 42',
+      projectRoot: '/test',
+    })
+
+    expect(promptOptions).toBeTruthy()
+    expect(promptOptions.body.tools).toEqual({ bash: true })
+  })
 })
