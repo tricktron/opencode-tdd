@@ -129,6 +129,24 @@ describe('parseResponse with test output', () => {
     expect(result.reason).toContain('Line 50')
     expect(result.reason).not.toContain('Line 51')
   })
+
+  test('respects custom line limit', () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`)
+    const testOutput = lines.join('\n')
+    const result = parseResponse(
+      'BLOCK: Write a failing test first',
+      testOutput,
+      20,
+    )
+
+    const outputSection = result.reason.split('Test output:\n')[1]
+    const outputLines = outputSection.split('\n')
+
+    expect(outputLines.length).toBeLessThanOrEqual(21) // 20 lines + possible truncation message
+    expect(result.reason).toContain('Line 1')
+    expect(result.reason).toContain('Line 20')
+    expect(result.reason).not.toContain('Line 21')
+  })
 })
 
 describe('Include Test Output in Block Errors', () => {
@@ -160,5 +178,39 @@ describe('Include Test Output in Block Errors', () => {
     expect(error.message).toContain('Test output:')
     expect(error.message).toContain('873 passing')
     expect(error.message).toContain('0 failing')
+  })
+
+  test('respects testOutputLines from config', async () => {
+    const projectRoot = await createProjectRoot()
+    const configPath = join(projectRoot, '.opencode', 'tdd.json')
+    await mkdir(join(projectRoot, '.opencode'), { recursive: true })
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        enforcePatterns: ['src/**'],
+        verifierModel: 'test-model',
+        testOutputLines: 5,
+      }),
+    )
+
+    const lines = Array.from({ length: 100 }, (_, i) => `Test line ${i + 1}`)
+    const testOutput = lines.join('\n')
+
+    const mockClient = mockSdkClientWithTestOutput(
+      testOutput,
+      'BLOCK: Write a failing test first',
+    )
+
+    const hook = await getHook(projectRoot, mockClient)
+
+    const error = await callHook(hook, 'edit', 'src/example.ts', {
+      newString: 'new code',
+    }).catch((e) => e)
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error.message).toContain('Test line 1')
+    expect(error.message).toContain('Test line 5')
+    expect(error.message).not.toContain('Test line 6')
+    expect(error.message).toContain('output truncated')
   })
 })

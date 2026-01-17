@@ -4,6 +4,7 @@ import { join } from 'node:path'
 export type TDDConfig = {
   verifierModel: string
   enforcePatterns: string[]
+  testOutputLines?: number
 }
 
 export type ConfigLoadResult =
@@ -24,6 +25,17 @@ const requireStringArray = (value: unknown, field: string) => {
   }
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new Error(`TDD: ${field} must be an array of strings`)
+  }
+
+  return value
+}
+
+const optionalPositiveInteger = (value: unknown, field: string) => {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`TDD: ${field} must be a positive integer`)
   }
 
   return value
@@ -50,12 +62,17 @@ export const loadConfig = async (
     config.enforcePatterns,
     'enforcePatterns',
   )
+  const testOutputLines = optionalPositiveInteger(
+    config.testOutputLines,
+    'testOutputLines',
+  )
 
   return {
     kind: 'loaded',
     config: {
       verifierModel,
       enforcePatterns,
+      testOutputLines,
     },
   }
 }
