@@ -23,13 +23,16 @@ describe('Edge Cases', () => {
 
 describe('Edit Content Passed to LLM', () => {
   const setupContentCapture = async () => {
+    type PromptOpts = Parameters<
+      import('../src/verifier').SdkClient['session']['prompt']
+    >[0]
     let receivedPrompt = ''
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
     const client = {
       session: {
         create: async () => ({ data: { id: 'test-session-id' } }),
-        prompt: async (opts: any) => {
+        prompt: async (opts: PromptOpts) => {
           receivedPrompt = opts.body.parts[0].text
           return {
             data: {
