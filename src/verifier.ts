@@ -38,15 +38,11 @@ Test Scopes:
 - When ambiguous, treat as unit test (stricter rule)
 
 Outside-In TDD Rules:
-- 1 red acceptance test + 1 red unit test → ALLOW (normal outside-in flow)
-- acceptanceFailingTests > 1 → BLOCK
-- unitFailingTests > 1 → BLOCK
-- Adding acceptance test while one is red → BLOCK
-- Adding unit test while one is red → BLOCK
-- Implementation with 0 unit failing tests:
-  - If acceptance test failing → ALLOW (scaffolding phase)
-  - Otherwise → BLOCK (write unit test first)
-- Implementation with 1 unit failing test → ALLOW
+- Max 1 red acceptance test, max 1 red unit test (both can be red simultaneously)
+- Implementation:
+  - With 1 red unit test → ALLOW
+  - With 0 red unit tests and 1 red acceptance test → ALLOW (scaffolding)
+  - With 0 red tests → BLOCK (write test first)
 - Modifying the red acceptance test → ALLOW (refinement ok)
 - Refactoring → ALLOW
 
