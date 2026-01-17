@@ -222,4 +222,135 @@ describe('Verifier Runs Tests', () => {
     expect(promptOptions).toBeTruthy()
     expect(promptOptions.body.tools).toEqual({ bash: true })
   })
+
+  // Slice: 24-extract-test-details-helper
+  // Given verifyEditWithTestRunner with nested loops and type casts
+  // When extracting test details logic into helper function
+  // Then all existing tests pass (behavior unchanged)
+  // And code is easier to read (reduced nesting, no type casts)
+
+  // Acceptance Test: Refactoring preserves behavior
+  it('extracts test details without changing behavior', async () => {
+    let auditEntry: any = null
+    const mockAuditor = {
+      record: async (entry: any) => {
+        auditEntry = entry
+      },
+    }
+
+    const mockClient = {
+      session: {
+        create: async () => ({ data: { id: 'child-session-refactor' } }),
+        prompt: async () => ({
+          data: {
+            parts: [{ type: 'text', text: 'ALLOW' }],
+          },
+        }),
+        messages: async () => ({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'assistant' },
+              parts: [
+                {
+                  type: 'tool',
+                  tool: 'bash',
+                  input: { command: 'bun test foo.test.ts' },
+                  state: {
+                    status: 'completed',
+                    output: 'Tests: 1 failed',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        delete: async () => ({}),
+      },
+    }
+
+    const { verifyEditWithTestRunner } = await import('../src/verifier')
+
+    await verifyEditWithTestRunner({
+      sdkClient: mockClient as any,
+      parentSessionId: 'parent-refactor',
+      model: 'opencode/test',
+      filePath: 'src/foo.ts',
+      editContent: 'export const foo = 42',
+      projectRoot: '/test',
+      auditor: mockAuditor,
+    })
+
+    // Verify behavior preserved: test details extracted correctly
+    expect(auditEntry).toBeTruthy()
+    expect(auditEntry.testCommand).toBe('bun test foo.test.ts')
+    expect(auditEntry.testOutput).toBe('Tests: 1 failed')
+  })
+
+  // Unit Test: extractTestDetails returns null when no bash tool execution found
+  it('extractTestDetails returns null when no bash execution found', async () => {
+    const { extractTestDetails } = await import('../src/verifier')
+
+    const mockClient = {
+      session: {
+        messages: async () => ({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'assistant' },
+              parts: [{ type: 'text', text: 'Some response' }],
+            },
+          ],
+        }),
+      },
+    }
+
+    const result = await extractTestDetails(mockClient as any, 'session-1')
+    expect(result).toBeNull()
+  })
+
+  // Unit Test: extractTestDetails extracts command and output from bash execution
+  it('extractTestDetails extracts command and output from bash execution', async () => {
+    const { extractTestDetails } = await import('../src/verifier')
+
+    const mockClient = {
+      session: {
+        messages: async () => ({
+          data: [
+            {
+              info: { id: 'msg-1', role: 'assistant' },
+              parts: [
+                {
+                  type: 'tool',
+                  tool: 'bash',
+                  input: { command: 'npm test' },
+                  state: {
+                    status: 'completed',
+                    output: 'All tests passed',
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+      },
+    }
+
+    const result = await extractTestDetails(mockClient as any, 'session-2')
+    expect(result).toEqual({ command: 'npm test', output: 'All tests passed' })
+  })
+
+  // Unit Test: extractTestDetails returns null when messages method not available
+  it('extractTestDetails returns null when messages method not available', async () => {
+    const { extractTestDetails } = await import('../src/verifier')
+
+    const mockClient = {
+      session: {
+        create: async () => ({ data: { id: 'test' } }),
+        prompt: async () => ({ data: { parts: [] } }),
+        delete: async () => ({}),
+      },
+    }
+
+    const result = await extractTestDetails(mockClient as any, 'session-3')
+    expect(result).toBeNull()
+  })
 })
