@@ -11,23 +11,20 @@ workspace "opencode-tdd" "TDD enforcement plugin for OpenCode AI agents" {
 
         tddPlugin = softwareSystem "opencode-tdd Plugin" "Enforces outside-in TDD discipline" {
             hook = container "Edit Hook" "Intercepts edit/write tool calls" "TypeScript"
-            verifier = container "LLM Verifier" "Enforces TDD rules via plain text ALLOW/BLOCK responses" "TypeScript"
+            verifier = container "LLM Verifier" "Runs tests directly and enforces TDD rules via plain text ALLOW/BLOCK responses" "TypeScript"
             config = container "Config Loader" "Loads .opencode/tdd.json" "TypeScript"
             auditor = container "Auditor" "Records verification decisions (success & parse failures)" "JSONL"
-            sessionReader = container "Session Reader" "Extracts bash outputs from session history" "TypeScript"
         }
 
         testRunner = softwareSystem "Test Runner" "External test framework (vitest, jest, etc.)" "External"
 
         # Relationships
         agent -> opencode.server "Sends prompts"
-        agent -> testRunner "Runs tests via bash tool"
         opencode.server -> tddPlugin.hook "Triggers before edit/write"
         tddPlugin.hook -> tddPlugin.config "Loads patterns and settings"
-        tddPlugin.hook -> tddPlugin.sessionReader "Queries for bash outputs"
-        tddPlugin.sessionReader -> opencode.server "Reads session message history"
-        tddPlugin.hook -> tddPlugin.verifier "Delegates classification"
+        tddPlugin.hook -> tddPlugin.verifier "Delegates TDD verification"
         tddPlugin.verifier -> opencode.server "Creates child session for LLM call"
+        tddPlugin.verifier -> testRunner "Runs tests via bash tool in child session"
         tddPlugin.verifier -> tddPlugin.auditor "Records decision & parse errors"
     }
 
