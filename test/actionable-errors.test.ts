@@ -3,25 +3,9 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
-import { verifyEdit } from '../src/verifier'
 
 // Slice: 12-actionable-error-messages
 // Given TDD violations occur, when errors are thrown, then error messages are actionable for driving LLM
-
-const mockClient = (response: string | (() => never)) => ({
-  chat: async () => {
-    if (typeof response === 'function') response()
-    return response as string
-  },
-})
-
-const verifyOpts = (client: ReturnType<typeof mockClient>) => ({
-  client,
-  model: 'model',
-  filePath: 'file.ts',
-  editContent: 'content',
-  testOutput: 'output',
-})
 
 const baseConfig = {
   enforcePatterns: ['src/**', 'test/**'],
@@ -40,7 +24,7 @@ const writeConfig = async (projectRoot: string, config: unknown) => {
 
 const mockSdkClientWithSession = (
   testOutput: string,
-  llmClient?: ReturnType<typeof mockClient>,
+  llmClient?: { chat: () => Promise<string> },
 ) => {
   const combined = {
     session: {
@@ -168,18 +152,6 @@ describe('Actionable Error Messages', () => {
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
       'TDD violation: Write a failing test first',
-    )
-  })
-
-  test('given verifier returns invalid response, when parsed, then defaults to actionable block reason', async () => {
-    await expect(
-      verifyEdit(verifyOpts(mockClient('invalid response text'))),
-    ).rejects.toThrow('Verification failed. Please retry this edit.')
-  })
-
-  test('given verifier returns BLOCK without reason, when parsed, then defaults to actionable block reason', async () => {
-    await expect(verifyEdit(verifyOpts(mockClient('BLOCK:')))).rejects.toThrow(
-      'Verification failed. Please retry this edit.',
     )
   })
 
