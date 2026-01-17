@@ -29,7 +29,7 @@ const parseResponse = (response: string): ParsedResponse => {
   }
 }
 
-type SdkClient = {
+export type SdkClient = {
   session: {
     create: (opts: {
       body: { title: string; parent?: string }
@@ -157,7 +157,11 @@ export const verifyEditWithTestRunner = async (
 
   try {
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Verification timed out. Please try edit again.')), timeoutMs)
+      setTimeout(
+        () =>
+          reject(new Error('Verification timed out. Please try edit again.')),
+        timeoutMs,
+      )
     })
 
     const verifyPromise = (async () => {
