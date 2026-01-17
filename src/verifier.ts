@@ -5,15 +5,38 @@ type ParsedResponse = {
   reason: string
 }
 
-const parseResponse = (response: string): ParsedResponse => {
+const stripAnsi = (text: string): string => {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;]*m/g, '')
+}
+
+const truncateOutput = (text: string, maxLines = 50): string => {
+  const lines = text.split('\n')
+  if (lines.length <= maxLines) {
+    return text
+  }
+  return lines.slice(0, maxLines).join('\n') + '\n... (output truncated)'
+}
+
+export const parseResponse = (
+  response: string,
+  testOutput?: string,
+): ParsedResponse => {
   const trimmed = response.trim()
 
   // Search for BLOCK: anywhere (LLM often adds reasoning before)
   const blockMatch = trimmed.match(/\*{0,2}BLOCK:\*{0,2}\s*(.*)$/m)
   if (blockMatch) {
-    const reason =
+    let reason =
       blockMatch[1].replace(/^\*+|\*+$/g, '').trim() ||
       'Verification failed. Please retry this edit.'
+
+    if (testOutput) {
+      const cleanedOutput = stripAnsi(testOutput)
+      const truncated = truncateOutput(cleanedOutput)
+      reason += `\n\nTest output:\n${truncated}`
+    }
+
     return { decision: 'block', reason }
   }
 
@@ -192,16 +215,16 @@ export const verifyEditWithTestRunner = async (
         throw new Error('No LLM response text received')
       }
 
-      const parsed = parseResponse(response)
+      // Extract test execution details from session messages
+      const testDetails = await extractTestDetails(opts.sdkClient, childId)
+      if (testDetails) {
+        testCommand = testDetails.command
+        testOutput = testDetails.output
+      }
+
+      const parsed = parseResponse(response, testOutput)
 
       if (opts.auditor) {
-        // Extract test execution details from session messages
-        const testDetails = await extractTestDetails(opts.sdkClient, childId)
-        if (testDetails) {
-          testCommand = testDetails.command
-          testOutput = testDetails.output
-        }
-
         await opts.auditor.record({
           timestamp: new Date().toISOString(),
           filePath: opts.filePath,

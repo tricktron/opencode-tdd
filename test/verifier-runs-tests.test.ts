@@ -240,8 +240,8 @@ describe('Verifier Runs Tests', () => {
     expect(result).toBeNull()
   })
 
-  // Unit Test: extractTestDetails only runs with auditor
-  it('does not call extractTestDetails when auditor is not provided', async () => {
+  // Unit Test: extractTestDetails runs for block errors
+  it('calls extractTestDetails to include test output in block errors', async () => {
     let messagesCalled = false
     const mockClient = createMockSdkClient()
 
@@ -263,7 +263,7 @@ describe('Verifier Runs Tests', () => {
       // No auditor provided
     })
 
-    expect(messagesCalled).toBe(false)
+    expect(messagesCalled).toBe(true)
   })
 
   // Unit Test: extractTestDetails runs with auditor

@@ -930,7 +930,9 @@ describe('Verification Audit', () => {
     expect(entry.prompt).toContain('src/example.ts')
     expect(entry.response).toContain('BLOCK')
     expect(entry.decision).toBe('block')
-    expect(entry.reason).toBe('test reason')
+    expect(entry.reason).toContain('test reason')
+    expect(entry.reason).toContain('Test output:')
+    expect(entry.reason).toContain('PASS all tests')
   })
 
   test('given multiple verifications, when I read the audit file, then entries are appended', async () => {
