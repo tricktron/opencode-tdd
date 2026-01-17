@@ -3,6 +3,34 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TDDPlugin } from '../src/index'
+import type { SdkClient } from '../src/verifier'
+
+// Slice: 29-fix-sdkclient-type-mismatch
+// Given the plugin initializes
+// When it passes sdkClient to verifyEditWithTestRunner
+// Then TypeScript compiles without type errors
+describe('SdkClient Type Safety', () => {
+  test('given plugin receives SdkClient, when passing to verifier, then types match', async () => {
+    const projectRoot = await createProjectRoot()
+    await writeConfig(projectRoot, baseConfig)
+
+    // Type-safe SdkClient that matches verifier.ts definition
+    const typedClient: SdkClient = {
+      session: {
+        create: async () => ({ data: { id: 'test-session-id' } }),
+        prompt: async () => ({
+          data: { parts: [{ type: 'text', text: 'ALLOW' }] },
+        }),
+        delete: async () => ({}),
+        messages: async () => ({ data: [] }), // Optional in verifier.ts
+      },
+    }
+
+    // Should not cause TypeScript errors
+    const hook = await getHook(projectRoot, typedClient)
+    expect(hook).toBeDefined()
+  })
+})
 
 describe('Edge Cases', () => {
   test('given special characters in file path, handles correctly', async () => {

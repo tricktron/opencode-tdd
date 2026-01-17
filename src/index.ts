@@ -4,35 +4,7 @@ import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
 import { formatError, safeLog, type AppLogger } from './logger'
-import { verifyEditWithTestRunner } from './verifier'
-
-type SdkClient = {
-  session: {
-    create: (opts: {
-      body: { title: string; parent?: string }
-    }) => Promise<{ data?: { id: string }; error?: unknown }>
-    prompt: (opts: {
-      path: { id: string }
-      body: {
-        model: { providerID: string; modelID: string }
-        parts: Array<{ type: string; text: string }>
-        tools?: { [key: string]: boolean }
-      }
-    }) => Promise<{
-      data?: { parts?: Array<{ type: string; text?: string }> }
-      error?: unknown
-    }>
-    delete: (opts: { path: { id: string } }) => Promise<unknown>
-    messages: (opts: { path: { id: string } }) => Promise<{
-      data?: Array<{
-        info: { id: string; role: string }
-        parts: Array<{ type: string }>
-      }>
-      error?: unknown
-    }>
-  }
-  app: AppLogger
-}
+import { verifyEditWithTestRunner, type SdkClient } from './verifier'
 
 const isEnforced = (
   filePath: string,
