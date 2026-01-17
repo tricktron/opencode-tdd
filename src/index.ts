@@ -4,63 +4,11 @@ import picomatch from 'picomatch'
 import { createAuditor, type Auditor } from './auditor'
 import { loadConfig, type TDDConfig } from './config'
 import { formatError, safeLog, type AppLogger } from './logger'
-import { verifyEdit, type LlmClient } from './verifier'
-
-const getTestOutputFromSession = async (
-  sdkClient: SdkClient,
-  sessionId: string,
-): Promise<string> => {
-  let messagesResponse
-  try {
-    messagesResponse = await sdkClient.session.messages({
-      path: { id: sessionId },
-    })
-  } catch (error) {
-    const details = error instanceof Error ? error.message : String(error)
-    throw new Error(`Failed to read session history: ${details}`)
-  }
-
-  if (messagesResponse.error || !messagesResponse.data) {
-    throw new Error('Failed to read session history')
-  }
-
-  const messages = messagesResponse.data
-
-  // Extract completed bash tool outputs
-  const bashOutputs: string[] = []
-  for (const msg of messages) {
-    for (const part of msg.parts) {
-      if (
-        part.type === 'tool' &&
-        (part as { tool?: string }).tool === 'bash' &&
-        (part as { state?: { status?: string } }).state?.status === 'completed'
-      ) {
-        const output = (part as { state: { output?: string } }).state.output
-        if (output) {
-          bashOutputs.push(output)
-        }
-      }
-    }
-  }
-
-  if (bashOutputs.length === 0) {
-    throw new Error('No bash command output found in session. Run tests first.')
-  }
-
-  // Take last 5 outputs
-  const last5 = bashOutputs.slice(-5)
-  return last5.join('\n\n')
-}
-
-const getTestOutput = async (
-  sdkClient: SdkClient | undefined,
-  sessionId: string,
-): Promise<string> => {
-  if (!sdkClient) {
-    throw new Error('SDK client required for session-based test output')
-  }
-  return getTestOutputFromSession(sdkClient, sessionId)
-}
+import {
+  verifyEdit,
+  verifyEditWithTestRunner,
+  type LlmClient,
+} from './verifier'
 
 type ToolPart = {
   type: 'tool'
@@ -100,80 +48,6 @@ type SdkClient = {
   app: AppLogger
 }
 
-const createSdkAdapter = (
-  sdkClient: SdkClient,
-  parentSessionId: string,
-): LlmClient => ({
-  chat: async (
-    model: string,
-    messages: Array<{ role: string; content: string }>,
-  ) => {
-    const systemMsg = messages.find((m) => m.role === 'system')?.content ?? ''
-    const userMsg = messages.find((m) => m.role === 'user')?.content ?? ''
-    const combinedPrompt = `${systemMsg}\n\n${userMsg}`
-    const [providerId, modelId] = model.split('/')
-
-    const sessionResult = await sdkClient.session.create({
-      body: { title: 'TDD Verifier', parent: parentSessionId },
-    })
-
-    if (sessionResult.error || !sessionResult.data?.id) {
-      throw new Error('Failed to create verification session')
-    }
-
-    const childId = sessionResult.data.id
-
-    try {
-      const promptResult = await sdkClient.session.prompt({
-        path: { id: childId },
-        body: {
-          model: { providerID: providerId, modelID: modelId },
-          parts: [{ type: 'text', text: combinedPrompt }],
-        },
-      })
-
-      if (promptResult.error) {
-        throw new Error('Verification prompt failed')
-      }
-
-      const textPart = promptResult.data?.parts?.find((p) => p.type === 'text')
-      const response = textPart?.text ?? ''
-
-      if (!response) {
-        throw new Error('No LLM response text received')
-      }
-
-      return response
-    } finally {
-      await sdkClient.session
-        .delete({ path: { id: childId } })
-        .catch((error) => {
-          safeLog(
-            sdkClient.app,
-            'debug',
-            'Failed to clean up verification session',
-            {
-              sessionId: childId,
-              error: formatError(error),
-            },
-          )
-        })
-    }
-  },
-})
-
-// Resolves LlmClient from the Plugin's `client` parameter.
-// The Plugin interface from @opencode-ai/plugin doesn't allow custom parameters,
-// so unit tests inject a mock LlmClient (with `chat` method) via the same `client` param.
-// Duck-typing detects mock vs real SDK client at runtime - pragmatic given the constraint.
-const resolveLlmClient = (client: unknown, sessionId: string): LlmClient => {
-  const mockClient = client as LlmClient | undefined
-  if (mockClient && typeof mockClient.chat === 'function') {
-    return mockClient
-  }
-  return createSdkAdapter(client as SdkClient, sessionId)
-}
-
 const isEnforced = (
   filePath: string,
   enforcePatterns: string[] | undefined,
@@ -198,19 +72,21 @@ type TDDContext = {
   filePath: string
   editContent: string
   config: TDDConfig
-  testOutput: string
-  llmClient: LlmClient
+  sdkClient: SdkClient
+  sessionId: string
+  projectRoot: string
   auditor: Auditor
 }
 
 const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
   try {
-    await verifyEdit({
-      client: ctx.llmClient,
+    await verifyEditWithTestRunner({
+      sdkClient: ctx.sdkClient,
+      parentSessionId: ctx.sessionId,
       model: ctx.config.verifierModel,
       filePath: ctx.filePath,
       editContent: ctx.editContent,
-      testOutput: ctx.testOutput,
+      projectRoot: ctx.projectRoot,
       auditor: ctx.auditor,
     })
   } catch (error) {
@@ -257,12 +133,8 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         return
       }
 
-      let testOutput: string
-      try {
-        testOutput = await getTestOutput(sdkClient, input.sessionID)
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`TDD violation: ${message}`)
+      if (!sdkClient) {
+        throw new Error('TDD violation: SDK client required for verification')
       }
 
       const editContent = getEditContent(input.tool, output.args)
@@ -271,8 +143,9 @@ export const TDDPlugin: Plugin = async ({ client, directory }) => {
         filePath,
         editContent,
         config: configResult.config,
-        testOutput,
-        llmClient: resolveLlmClient(client, input.sessionID),
+        sdkClient,
+        sessionId: input.sessionID,
+        projectRoot,
         auditor,
       })
     },

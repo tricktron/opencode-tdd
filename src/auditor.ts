@@ -8,6 +8,8 @@ export type AuditEntry = {
   response: string
   decision: 'allow' | 'block'
   reason: string
+  testCommand?: string
+  testOutput?: string
 }
 
 export type Auditor = {

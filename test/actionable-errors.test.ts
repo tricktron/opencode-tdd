@@ -113,15 +113,15 @@ const callHook = (
   )
 
 describe('Actionable Error Messages', () => {
-  // Slice: 18-fix-eslint-warnings
-  // Given SDK throws error, when session query fails, then error details are preserved
-  test('given session query fails with details, when edit attempted, then error includes specific details', async () => {
+  // Slice: 21-verifier-runs-tests
+  // Given SDK session creation fails, when edit attempted, then error details are preserved
+  test('given session creation fails with details, when edit attempted, then error includes specific details', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
 
     const mockSdkClient = {
       session: {
-        messages: async () => {
+        create: async () => {
           throw new Error('Network timeout')
         },
       },
@@ -130,18 +130,18 @@ describe('Actionable Error Messages', () => {
     const hook = await getHook(projectRoot, mockSdkClient)
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'TDD violation: Failed to read session history: Network timeout',
+      'TDD violation: Network timeout',
     )
   })
 
-  test('given no session history, when edit attempted, then error uses actionable instruction', async () => {
+  test('given session create returns error, when edit attempted, then error uses actionable message', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
 
     const mockSdkClient = {
       session: {
-        messages: async () => ({
-          data: [],
+        create: async () => ({
+          error: 'Session limit reached',
         }),
       },
     }
@@ -149,7 +149,7 @@ describe('Actionable Error Messages', () => {
     const hook = await getHook(projectRoot, mockSdkClient)
 
     await expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'No bash command output found in session. Run tests first.',
+      'Failed to create verification session',
     )
   })
 

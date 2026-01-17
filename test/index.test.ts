@@ -122,70 +122,51 @@ describe('Edge Cases', () => {
 
 describe('Edit Content Passed to LLM', () => {
   const setupContentCapture = async () => {
+    let receivedPrompt = ''
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
-
-    let receivedContent: string | undefined
     const client = {
       session: {
-        messages: async () => ({
-          data: [
-            {
-              info: { id: 'msg-1', role: 'assistant' as const },
+        create: async () => ({ data: { id: 'test-session-id' } }),
+        prompt: async (opts: any) => {
+          receivedPrompt = opts.body.parts[0].text
+          return {
+            data: {
               parts: [
                 {
-                  type: 'tool' as const,
-                  tool: 'bash',
-                  state: {
-                    status: 'completed' as const,
-                    output: 'PASS all tests',
-                  },
+                  type: 'text' as const,
+                  text: 'ALLOW',
                 },
               ],
             },
-          ],
-        }),
-        create: async () => ({ data: { id: 'test-session-id' } }),
-        prompt: async () => ({
-          data: {
-            parts: [
-              {
-                type: 'text' as const,
-                text: 'ALLOW',
-              },
-            ],
-          },
-        }),
+          }
+        },
         delete: async () => ({}),
       },
       app: { log: async () => ({}) },
-      chat: async (_model: string, messages: Array<{ content: string }>) => {
-        receivedContent = messages[1].content
-        return 'ALLOW'
-      },
     }
     const hook = await getHook(projectRoot, client)
-    return { hook, getReceivedContent: () => receivedContent }
+    return { hook, getReceivedPrompt: () => receivedPrompt }
   }
 
   test('given edit tool call, passes newString content to LLM', async () => {
-    const { hook, getReceivedContent } = await setupContentCapture()
+    const { hook, getReceivedPrompt } = await setupContentCapture()
 
     await callHook(hook, 'edit', 'src/example.ts', {
       newString: 'new code here',
     })
 
-    expect(getReceivedContent()).toContain('new code here')
+    expect(getReceivedPrompt()).toContain('new code here')
   })
 
   test('given write tool call, passes content to LLM', async () => {
-    const { hook, getReceivedContent } = await setupContentCapture()
+    const { hook, getReceivedPrompt } = await setupContentCapture()
 
     await callHook(hook, 'write', 'src/example.ts', {
       content: 'full file content',
     })
 
-    expect(getReceivedContent()).toContain('full file content')
+    expect(getReceivedPrompt()).toContain('full file content')
   })
 })
 
@@ -463,21 +444,19 @@ describe('TDDPlugin', () => {
     ).resolves.toBeUndefined()
   })
 
-  test('blocks when session has no bash output', async () => {
+  test('blocks when verifier session fails to create', async () => {
     const projectRoot = await createProjectRoot()
     await writeConfig(projectRoot, baseConfig)
 
     const mockClient = {
       session: {
-        messages: async () => ({
-          data: [],
-        }),
+        create: async () => ({ error: 'Failed to create session' }),
       },
     }
     const hook = await getHook(projectRoot, mockClient)
 
     return expect(callHook(hook, 'edit', 'src/example.ts')).rejects.toThrow(
-      'No bash command output found in session',
+      'Failed to create verification session',
     )
   })
 
