@@ -8,8 +8,8 @@ const fixtureRoot = join(repoRoot, 'test', 'e2e', 'fixture')
 const testOutputPath = join(fixtureRoot, '.opencode/tdd/smoke-test-output.txt')
 const auditPath = join(fixtureRoot, '.opencode/tdd/audit.jsonl')
 
-const EVENT_WAIT_TIMEOUT_MS = 30000
-const TEST_TIMEOUT_MS = 35000
+const EVENT_WAIT_TIMEOUT_MS = 60000
+const TEST_TIMEOUT_MS = 65000
 
 type EventStream = AsyncGenerator<{
   type: string
@@ -166,7 +166,7 @@ const runTddPluginTest = async (ctx: TestContext) => {
   }
 }
 
-describe.skip('SDK E2E', () => {
+describe('SDK E2E', () => {
   beforeAll(setupFixture)
   afterEach(cleanupTest)
 
