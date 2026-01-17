@@ -74,6 +74,7 @@ const verifyWithLlm = async (ctx: TDDContext): Promise<void> => {
       editContent: ctx.editContent,
       projectRoot: ctx.projectRoot,
       auditor: ctx.auditor,
+      testOutputLines: ctx.config.testOutputLines,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

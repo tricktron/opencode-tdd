@@ -21,6 +21,7 @@ const truncateOutput = (text: string, maxLines = 50): string => {
 export const parseResponse = (
   response: string,
   testOutput?: string,
+  maxLines?: number,
 ): ParsedResponse => {
   const trimmed = response.trim()
 
@@ -33,7 +34,7 @@ export const parseResponse = (
 
     if (testOutput) {
       const cleanedOutput = stripAnsi(testOutput)
-      const truncated = truncateOutput(cleanedOutput)
+      const truncated = truncateOutput(cleanedOutput, maxLines ?? 50)
       reason += `\n\nTest output:\n${truncated}`
     }
 
@@ -85,6 +86,7 @@ export type VerifyEditWithTestRunnerOptions = {
   projectRoot: string
   timeoutMs?: number
   auditor?: Auditor
+  testOutputLines?: number
 }
 
 type TestDetails = { command: string; output: string } | null
@@ -222,7 +224,7 @@ export const verifyEditWithTestRunner = async (
         testOutput = testDetails.output
       }
 
-      const parsed = parseResponse(response, testOutput)
+      const parsed = parseResponse(response, testOutput, opts.testOutputLines)
 
       if (opts.auditor) {
         await opts.auditor.record({
