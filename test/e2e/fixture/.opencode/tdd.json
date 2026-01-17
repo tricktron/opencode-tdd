@@ -1,4 +1,0 @@
-{
-  "enforcePatterns": ["**/src/**", "**/test/**"],
-  "verifierModel": "opencode/minimax-m2.1-free"
-}
