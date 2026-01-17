@@ -90,6 +90,7 @@ type SdkClient = {
       body: {
         model: { providerID: string; modelID: string }
         parts: Array<{ type: string; text: string }>
+        tools?: { [key: string]: boolean }
       }
     }) => Promise<{
       data?: { parts?: Array<{ type: string; text?: string }> }
@@ -162,6 +163,7 @@ export const verifyEditWithTestRunner = async (
               text: `${VERIFIER_PROMPT}\n\n${userPrompt}`,
             },
           ],
+          tools: { bash: true },
         },
       })
 

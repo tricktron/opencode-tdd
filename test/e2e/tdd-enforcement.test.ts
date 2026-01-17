@@ -8,8 +8,8 @@ const fixtureRoot = join(repoRoot, 'test', 'e2e', 'fixture')
 const testOutputPath = join(fixtureRoot, '.opencode/tdd/smoke-test-output.txt')
 const auditPath = join(fixtureRoot, '.opencode/tdd/audit.jsonl')
 
-const EVENT_WAIT_TIMEOUT_MS = 20000
-const TEST_TIMEOUT_MS = 25000
+const EVENT_WAIT_TIMEOUT_MS = 30000
+const TEST_TIMEOUT_MS = 35000
 
 type EventStream = AsyncGenerator<{
   type: string
@@ -55,14 +55,23 @@ const waitForToolError = async (
 }
 
 const waitForSessionIdle = async (stream: EventStream, sessionId: string) => {
+  const start = Date.now()
   for await (const event of stream) {
+    if (Date.now() - start > EVENT_WAIT_TIMEOUT_MS) {
+      console.error('[E2E] Timeout waiting for session.idle')
+      throw new Error(
+        `Timeout waiting for session.idle after ${EVENT_WAIT_TIMEOUT_MS}ms`,
+      )
+    }
     if (event.type === 'session.idle') {
       const props = event.properties as { sessionID?: string }
       if (props.sessionID === sessionId) {
+        console.log('[E2E] Session idle event received')
         return
       }
     }
   }
+  throw new Error('Stream ended without session.idle event')
 }
 
 const setupFixture = async () => {
@@ -127,6 +136,7 @@ const runTddPluginTest = async (ctx: TestContext) => {
 
     const { stream } = await client.event.subscribe()
 
+    console.log('[E2E] Sending prompt to session:', sessionId)
     await client.session.promptAsync({
       path: { id: sessionId },
       body: {
@@ -139,6 +149,7 @@ const runTddPluginTest = async (ctx: TestContext) => {
         ],
       },
     })
+    console.log('[E2E] Prompt sent, waiting for completion...')
 
     if (ctx.expectedErrorPattern) {
       await waitForToolError(
@@ -159,17 +170,21 @@ describe.skip('SDK E2E', () => {
   beforeAll(setupFixture)
   afterEach(cleanupTest)
 
-  // Slice: 21-verifier-runs-tests
-  // E2E test requires real LLM with bash tool access to verify test runner integration
-  // Unit tests in verifier-runs-tests.test.ts cover the core functionality
+  // Slice: 22-e2e-verifier-runs-tests
+  // Given: Fixture project with failing test for src/foo.ts
+  // When: Plugin intercepts edit to add implementation to src/foo.ts
+  // Then: Verifier runs tests via bash in child session
+  // And: Verifier allows edit (1 red test satisfies TDD)
+  // NOTE: Requires working OpenCode environment with LLM API access
+  // Run manually: bun test test/e2e/tdd-enforcement.test.ts
   test(
-    'verifier runs tests and makes TDD decision',
+    'verifier runs tests and allows edit when one red test exists',
     () =>
       runTddPluginTest({
         setupTestOutput: async () => {
           // No test output file needed - verifier runs tests itself
         },
-        shouldSucceed: true, // Verifier should be able to run tests and make decision
+        shouldSucceed: true, // Verifier should allow edit (1 red test satisfies TDD)
       }),
     TEST_TIMEOUT_MS,
   )

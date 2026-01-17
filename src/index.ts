@@ -31,6 +31,7 @@ type SdkClient = {
       body: {
         model: { providerID: string; modelID: string }
         parts: Array<{ type: string; text: string }>
+        tools?: { [key: string]: boolean }
       }
     }) => Promise<{
       data?: { parts?: Array<{ type: string; text?: string }> }
