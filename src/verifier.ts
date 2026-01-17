@@ -60,6 +60,63 @@ export type VerifyEditWithTestRunnerOptions = {
   auditor?: Auditor
 }
 
+type TestDetails = { command: string; output: string } | null
+
+type SessionMessage = {
+  info: { id: string; role: string }
+  parts: Array<MessagePart>
+}
+
+type MessagePart = { type: 'text'; text: string } | BashToolPart
+
+type BashToolPart = {
+  type: 'tool'
+  tool: string
+  input?: { command?: string }
+  state?: { status?: string; output?: string }
+}
+
+const findBashToolPart = (parts: Array<MessagePart>): BashToolPart | null => {
+  for (const part of parts) {
+    if (part.type !== 'tool') continue
+
+    const toolPart = part as BashToolPart
+    if (toolPart.tool === 'bash' && toolPart.state?.status === 'completed') {
+      return toolPart
+    }
+  }
+  return null
+}
+
+export const extractTestDetails = async (
+  sdkClient: SdkClient,
+  sessionId: string,
+): Promise<TestDetails> => {
+  if (!('messages' in sdkClient.session)) {
+    return null
+  }
+
+  const messagesResult = await (sdkClient.session as any).messages({
+    path: { id: sessionId },
+  })
+
+  if (!messagesResult.data) {
+    return null
+  }
+
+  for (const msg of messagesResult.data as SessionMessage[]) {
+    const bashPart = findBashToolPart(msg.parts)
+    if (bashPart) {
+      return {
+        command: bashPart.input?.command || '',
+        output: bashPart.state?.output || '',
+      }
+    }
+  }
+
+  return null
+}
+
 const VERIFIER_PROMPT = `You are a TDD verification agent with bash tool access.
 
 Your task:
@@ -128,25 +185,10 @@ export const verifyEditWithTestRunner = async (
       }
 
       // Extract test execution details from session messages
-      if ('messages' in opts.sdkClient.session) {
-        const messagesResult = await (opts.sdkClient.session as any).messages({
-          path: { id: childId },
-        })
-
-        if (messagesResult.data) {
-          for (const msg of messagesResult.data) {
-            for (const part of msg.parts) {
-              if (
-                part.type === 'tool' &&
-                (part as any).tool === 'bash' &&
-                (part as any).state?.status === 'completed'
-              ) {
-                testCommand = (part as any).input?.command || ''
-                testOutput = (part as any).state?.output || ''
-              }
-            }
-          }
-        }
+      const testDetails = await extractTestDetails(opts.sdkClient, childId)
+      if (testDetails) {
+        testCommand = testDetails.command
+        testOutput = testDetails.output
       }
 
       const parsed = parseResponse(response)
