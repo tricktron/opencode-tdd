@@ -1,4 +1,5 @@
 import type { Auditor } from './auditor'
+import type { AppLogger } from './logger'
 
 type ParsedResponse = {
   decision: 'allow' | 'block'
@@ -75,6 +76,7 @@ export type SdkClient = {
       error?: unknown
     }>
   }
+  app?: AppLogger
 }
 
 export type VerifyEditWithTestRunnerOptions = {
