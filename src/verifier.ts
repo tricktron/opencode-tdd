@@ -46,6 +46,10 @@ type SdkClient = {
       error?: unknown
     }>
     delete: (opts: { path: { id: string } }) => Promise<unknown>
+    messages?: (opts: { path: { id: string } }) => Promise<{
+      data?: Array<SessionMessage>
+      error?: unknown
+    }>
   }
 }
 
@@ -92,11 +96,11 @@ export const extractTestDetails = async (
   sdkClient: SdkClient,
   sessionId: string,
 ): Promise<TestDetails> => {
-  if (!('messages' in sdkClient.session)) {
+  if (!sdkClient.session.messages) {
     return null
   }
 
-  const messagesResult = await (sdkClient.session as any).messages({
+  const messagesResult = await sdkClient.session.messages({
     path: { id: sessionId },
   })
 
@@ -104,7 +108,7 @@ export const extractTestDetails = async (
     return null
   }
 
-  for (const msg of messagesResult.data as SessionMessage[]) {
+  for (const msg of messagesResult.data) {
     const bashPart = findBashToolPart(msg.parts)
     if (bashPart) {
       return {
@@ -184,16 +188,16 @@ export const verifyEditWithTestRunner = async (
         throw new Error('No LLM response text received')
       }
 
-      // Extract test execution details from session messages
-      const testDetails = await extractTestDetails(opts.sdkClient, childId)
-      if (testDetails) {
-        testCommand = testDetails.command
-        testOutput = testDetails.output
-      }
-
       const parsed = parseResponse(response)
 
       if (opts.auditor) {
+        // Extract test execution details from session messages
+        const testDetails = await extractTestDetails(opts.sdkClient, childId)
+        if (testDetails) {
+          testCommand = testDetails.command
+          testOutput = testDetails.output
+        }
+
         await opts.auditor.record({
           timestamp: new Date().toISOString(),
           filePath: opts.filePath,
