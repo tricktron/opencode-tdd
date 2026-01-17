@@ -95,7 +95,7 @@ describe('Verifier Runs Tests', () => {
         projectRoot: '/test',
         timeoutMs: 100, // Short timeout for test
       }),
-    ).rejects.toThrow('Verification timed out')
+    ).rejects.toThrow('Verification timed out. Please try edit again.')
 
     expect(sessionDeleted).toBe(true)
   })

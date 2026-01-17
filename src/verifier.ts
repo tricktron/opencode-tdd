@@ -157,7 +157,7 @@ export const verifyEditWithTestRunner = async (
 
   try {
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Verification timed out')), timeoutMs)
+      setTimeout(() => reject(new Error('Verification timed out. Please try edit again.')), timeoutMs)
     })
 
     const verifyPromise = (async () => {
