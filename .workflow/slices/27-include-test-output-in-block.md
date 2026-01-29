@@ -1,5 +1,7 @@
 # Slice: Include Test Output in Block Errors
 
+**Status: COMPLETE**
+
 ## User Story
 
 As a driving LLM, I want block errors to include actual test output so that I can see ground truth, not just the verifier's interpretation.

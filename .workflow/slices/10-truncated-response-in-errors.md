@@ -1,5 +1,7 @@
 # Slice 10: Include Truncated Response in Parse Errors
 
+**Status: COMPLETE**
+
 ## User Story
 
 **As a** driving LLM receiving verification errors

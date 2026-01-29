@@ -1,5 +1,7 @@
 # Slice 23: Remove Dead Code
 
+**Status: COMPLETE**
+
 ## Goal
 
 Remove dead code from slice 21 refactoring. After switching from `verifyEdit()` to `verifyEditWithTestRunner()`, the old verification path and its types are no longer used.

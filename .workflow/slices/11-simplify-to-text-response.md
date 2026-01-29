@@ -1,5 +1,7 @@
 # Slice 11: Simplify Verifier to Plain Text Response
 
+**Status: COMPLETE**
+
 ## User Story
 
 **As a** developer maintaining the TDD plugin

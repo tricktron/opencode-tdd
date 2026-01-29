@@ -1,5 +1,7 @@
 # Slice 17: Remove Redundant Acceptance Tests
 
+**Status: COMPLETE**
+
 ## Goal
 
 Delete slice acceptance test files that served their purpose during implementation but are now redundant with coverage in `index.test.ts`.

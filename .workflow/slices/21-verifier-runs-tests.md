@@ -1,5 +1,7 @@
 # Slice 21: Verifier Runs Tests
 
+**Status: COMPLETE**
+
 ## Goal
 
 Replace session history query with verifier running tests directly. Eliminates brittleness from "last 5 bash outputs" heuristic which may contain stale or irrelevant commands.
