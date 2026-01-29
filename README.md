@@ -29,10 +29,11 @@ Create `.opencode/tdd.json`:
 }
 ```
 
-| Option            | Description                       | Default    |
-| ----------------- | --------------------------------- | ---------- |
-| `enforcePatterns` | Globs for files to enforce TDD on | `["**/*"]` |
-| `verifierModel`   | LLM model for TDD verification    | required   |
+| Option            | Description                              | Default    |
+| ----------------- | ---------------------------------------- | ---------- |
+| `enforcePatterns` | Globs for files to enforce TDD on        | `["**/*"]` |
+| `verifierModel`   | LLM model for TDD verification           | required   |
+| `testOutputLines` | Max lines of test output in block errors | `50`       |
 
 ## Driving LLM System Prompt
 
@@ -74,6 +75,16 @@ When you edit a file matching `enforcePatterns`:
 - Fixing compile errors is always allowed
 - Compile errors don't trigger "multiple failing tests" rule
 - With 1 red acceptance test, you can scaffold implementation before writing unit tests
+
+**Block errors include test output** so you can see ground truth, not just the verifier's interpretation:
+
+```
+TDD violation: Write a failing test first
+
+Test output:
+  PASS src/foo.test.ts
+  873 passing, 0 failing
+```
 
 ## Verification Audit
 
