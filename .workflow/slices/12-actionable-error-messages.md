@@ -1,5 +1,7 @@
 # Slice 12: Actionable Error Messages for Driving LLM
 
+**Status: COMPLETE**
+
 ## User Story
 
 **As a** driving LLM receiving TDD verification errors
@@ -15,10 +17,10 @@ Research confirmed that error messages DO reach the driving LLM via the AI SDK's
 
 ## Acceptance Criteria
 
-- [ ] Error messages use prefix `TDD violation:` instead of `TDD:`
-- [ ] Verifier parse errors default to actionable block reason instead of exposing internal failure
-- [ ] All error messages end with clear instruction for what to do next
-- [ ] README documents system prompt addition for driving LLM awareness
+- [x] Error messages use prefix `TDD violation:` instead of `TDD:`
+- [x] Verifier parse errors default to actionable block reason instead of exposing internal failure
+- [x] All error messages end with clear instruction for what to do next
+- [x] README documents system prompt addition for driving LLM awareness
 
 ## Technical Changes
 

@@ -1,5 +1,7 @@
 # Slice 13: Tolerant Response Parsing
 
+**Status: COMPLETE**
+
 ## User Story
 
 **As a** TDD plugin user
@@ -20,11 +22,11 @@ Current parser only matches responses starting with `BLOCK:`, causing all verbos
 
 ## Acceptance Criteria
 
-- [ ] Parser extracts `BLOCK: reason` from anywhere in response (not just start)
-- [ ] Parser handles markdown bold: `**BLOCK: reason**`, `**BLOCK:** reason`
-- [ ] Parser strips markdown formatting (`*`, `**`) from extracted reason
-- [ ] Parser extracts `ALLOW` from end of verbose responses
-- [ ] Audit log `reason` field contains actual LLM reason, not default
+- [x] Parser extracts `BLOCK: reason` from anywhere in response (not just start)
+- [x] Parser handles markdown bold: `**BLOCK: reason**`, `**BLOCK:** reason`
+- [x] Parser strips markdown formatting (`*`, `**`) from extracted reason
+- [x] Parser extracts `ALLOW` from end of verbose responses
+- [x] Audit log `reason` field contains actual LLM reason, not default
 
 ## Technical Changes
 

@@ -1,5 +1,7 @@
 # Slice: Scaffolding Rule
 
+**Status: COMPLETE**
+
 ## User Story
 
 As an opencode-tdd plugin user, I want the verifier to allow scaffolding when my acceptance test is failing, so that I can follow natural outside-in TDD without being forced to write unit tests prematurely.

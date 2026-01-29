@@ -1,5 +1,7 @@
 # Slice 18: Fix ESLint Warnings
 
+**Status: COMPLETE**
+
 ## Goal
 
 Fix two ESLint warnings: unused error variable (loss of debug info) and unused import (cleanup).

@@ -1,5 +1,7 @@
 # Slice: Configurable Test Output Limit
 
+**Status: COMPLETE**
+
 ## User Story
 
 As a plugin user, I want to configure how much test output is included in block errors so that I can tune it for my test framework's verbosity.

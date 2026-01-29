@@ -1,5 +1,7 @@
 # Slice 25: Optional Methods and Conditional Audit
 
+**Status: COMPLETE**
+
 ## Goal
 
 1. Add `messages?` as optional method to verifier's `SdkClient` type (removes `as any` cast)
